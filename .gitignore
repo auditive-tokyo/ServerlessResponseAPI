@@ -3,3 +3,4 @@ dir_*
 __pycache__/
 *env/
 .DS_Store
+nohup.out
