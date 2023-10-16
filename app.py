@@ -29,7 +29,7 @@ local_data = threading.local()
 
 # Global variables
 max_requests = float('inf')
-reset_time = 3600
+reset_time = 10800
 threshold = 0.7
 model = 'gpt-3.5-turbo-16k'
 knowledge_about_user = ""
