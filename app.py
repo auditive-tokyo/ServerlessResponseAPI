@@ -354,7 +354,7 @@ def get_similar_faiss_id(headers, local_model, local_knowledge_about_user, user_
     matched_ids = re.findall(r'\d+', response.choices[0].message['content'])
     print(f"Matched IDs: {matched_ids}")
     
-    return matched_ids[:2]  # 最初の2つのIDのみを返す
+    return matched_ids[:4]  # 最初の4つのIDを返す
 
 @app.route('/message', methods=['POST'])
 def message():
@@ -564,7 +564,7 @@ def message():
                 temp_references.append({"role": "assistant", "content": reference_content})
                 
                 added_count += 1
-                if added_count >= 2:  # 上位2つの結果のみを保存
+                if added_count >= 4:  # 上位4つの結果を保存
                     break
 
     # 一時的なリストを逆順にして、historyに追加
