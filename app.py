@@ -541,7 +541,7 @@ def message():
 
         # Thresholdを超えたIDを履歴に追加
         # スコアと関連する情報を同時にソート
-        sorted_indices = np.argsort(combined_scores)[::-2]  # スコアを降順でソート
+        sorted_indices = np.argsort(combined_scores)[::-1]  # スコアを降順でソート
         added_count = 0
 
         for idx in sorted_indices:
