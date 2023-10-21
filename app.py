@@ -10,6 +10,7 @@ import numpy as np
 import faiss
 import json
 from datetime import datetime, timedelta
+import time
 import csv
 from langdetect import detect
 import validators
@@ -47,81 +48,130 @@ settings_path = ""
 def generate_folder_name(cognito_user_id):
     return f"dir_{cognito_user_id}"
 
-def update_settings_path():
-    global settings_path
-    folder_name = local_data.folder_name
+def update_settings_path(cognito_user_id):
+    folder_name = generate_folder_name(cognito_user_id)
     settings_path = os.path.join(os.path.dirname(__file__), folder_name, 'settings.json')
+    return settings_path
     
 # reference.jsonの読み込み
-def get_file_path():
-    global file_path, data, documents
-    folder_name = local_data.folder_name
+def get_file_path(cognito_user_id):
+    folder_name = generate_folder_name(cognito_user_id)
     file_path = os.path.join(os.path.dirname(__file__), folder_name, 'reference.json')
     with open(file_path, 'r') as f:
         data = json.load(f)
         documents = data
+    return file_path, data, documents
 
 # vectors.npyの読み込み
 dimension = 1536
 index = None
 vectors = None
 
-def load_vectors_and_create_index():
-    global vectors_path, vectors, index
-    folder_name = local_data.folder_name
+def load_vectors_and_create_index(cognito_user_id):
+    folder_name = generate_folder_name(cognito_user_id)
     vectors_path = os.path.join(os.path.dirname(__file__), folder_name, 'vectors.npy')
     vectors = np.load(vectors_path)
     
     index = faiss.IndexFlatL2(dimension)
     index.add(vectors)
     
-def set_cognito_data(cognito_user_id):
-    # フォルダ名を動的に生成
-    folder_name = generate_folder_name(cognito_user_id)
-    
-    # スレッドローカル変数に値を設定
-    local_data.folder_name = folder_name
+    return vectors_path, vectors, index
 
-    # settings_pathを更新
-    update_settings_path()
-    
-    # 設定をロード
-    load_config(cognito_user_id)
-    
-    # reference.jsonのpath更新
-    get_file_path()
-    
-    # vectors_pathの更新
-    load_vectors_and_create_index()
+# キャッシュの有効期限（秒）
+CACHE_EXPIRY = 3600
+# キャッシュ用の辞書
+cognito_cache = {}
+# グローバルロックの作成
+cache_lock = threading.Lock()
+
+def check_cache_expiry():
+    while True:
+        with cache_lock:  # この行を追加
+            current_time = datetime.now()
+            keys_to_delete = []
+            for cognito_user_id, cache_data in cognito_cache.items():
+                if current_time - cache_data['last_accessed'] > timedelta(seconds=CACHE_EXPIRY):
+                    keys_to_delete.append(cognito_user_id)
+            for key in keys_to_delete:
+                del cognito_cache[key]
+                print(f"Cache for Cognito user ID {key} has been cleared.")
+        time.sleep(CACHE_EXPIRY)
+
+# スレッドを起動
+cache_thread = threading.Thread(target=check_cache_expiry)
+cache_thread.daemon = True  # メインプログラムが終了したらスレッドも終了
+cache_thread.start()
+
+def set_cognito_data(cognito_user_id):
+    try:
+        # settings_pathを更新
+        update_settings_path(cognito_user_id)
+        # 設定をロード
+        load_config(cognito_user_id)
+        # reference.jsonのpath更新
+        file_path, data, documents = get_file_path(cognito_user_id)
+        # vectors_pathの更新
+        vectors_path, vectors, index = load_vectors_and_create_index(cognito_user_id)
+    except Exception as e:
+        print(f"Error in set_cognito_data: {e}")
+        return None
+
+    with cache_lock: 
+        cognito_cache[cognito_user_id] = {
+            'file_path': file_path,
+            'data': data,
+            'documents': documents,
+            'vectors_path': vectors_path,
+            'vectors': vectors,
+            'index': index,
+            'last_accessed': datetime.now()
+        }
+    return True  # 成功した場合はTrueを返す
 
 @app.route('/get_cognito_id', methods=['POST'])
 def get_cognito_id_route():
-    cognito_user_id = request.form.get("member_id")
-    set_cognito_data(cognito_user_id)
-    return cognito_user_id
+    try:
+        cognito_user_id = request.form.get("member_id")
+        result = set_cognito_data(cognito_user_id)
+        if result is None:
+            print("Failed to set cognito data")
+            return "Failed to set cognito data", 500
+        return cognito_user_id
+    except Exception as e:
+        print(f"Error in get_cognito_id_route: {e}")
+        return "Internal Server Error", 500
 
+# グローバルロックの作成
+settings_lock = threading.Lock()
 user_settings = {}
 def load_config(cognito_user_id):
-    try:
-        with open(settings_path, 'r') as f:
-            config = json.load(f)
-            user_settings[cognito_user_id] = {
-                'api_key': config.get('api_key', openai.api_key),
-                'max_requests': float(config.get('max_requests', max_requests)),
-                'reset_time': int(config.get('reset_time', reset_time)),
-                'threshold': float(config.get('threshold', threshold)),
-                'model': config.get('model', model),
-                'knowledge_about_user': config.get('knowledge_about_user', knowledge_about_user),
-                'response_preference': config.get('response_preference', response_preference),
-                'log_option': config.get('log_option', log_option),
-                'history_maxlen': int(config.get('history_maxlen', history_maxlen)) if config.get('history_maxlen', history_maxlen) != float('inf') else float('inf'),
-                'USERNAME': config.get('USERNAME', 'admin'),
-                'PASSWORD': config.get('PASSWORD', 'password'),
-                'questions': config.get('questions', '').split("\n") if config.get('questions', '') else [],
-                'corresponding_ids': config.get('corresponding_ids', '').split("\n") if config.get('corresponding_ids', '') else []
-            }
-    except FileNotFoundError:
-        pass
+    with settings_lock:
+        try:
+            settings_path = update_settings_path(cognito_user_id)
+            # print(f"Loading config from {settings_path}")  # デバッグ用
+            with open(settings_path, 'r') as f:
+                config = json.load(f)
+                # print(f"Loaded config: {config}")  # デバッグ用
+                user_settings[cognito_user_id] = {
+                    'api_key': config.get('api_key', openai.api_key),
+                    'max_requests': float(config.get('max_requests', max_requests)),
+                    'reset_time': int(config.get('reset_time', reset_time)),
+                    'threshold': float(config.get('threshold', threshold)),
+                    'model': config.get('model', model),
+                    'knowledge_about_user': config.get('knowledge_about_user', knowledge_about_user),
+                    'response_preference': config.get('response_preference', response_preference),
+                    'log_option': config.get('log_option', log_option),
+                    'history_maxlen': int(config.get('history_maxlen', history_maxlen)) if config.get('history_maxlen', history_maxlen) != float('inf') else float('inf'),
+                    'USERNAME': config.get('USERNAME', 'admin'),
+                    'PASSWORD': config.get('PASSWORD', 'password'),
+                    'questions': config.get('questions', '').split("\n") if config.get('questions', '') else [],
+                    'corresponding_ids': config.get('corresponding_ids', '').split("\n") if config.get('corresponding_ids', '') else []
+                }
+        except FileNotFoundError:
+            # print("File not found.")  # デバッグ用
+            pass  # ファイルが見つからない場合は特に何もしない
+        except Exception as e:
+            print(f"Error in load_config: {e}")
 
 auth = HTTPBasicAuth()
 
@@ -129,33 +179,35 @@ auth = HTTPBasicAuth()
 def verify_password(username, password):
     cognito_user_id = username
     load_config(cognito_user_id)
-    user_specific_settings = user_settings.get(cognito_user_id, {})
+    with settings_lock:  # ロックをかける
+        user_specific_settings = user_settings.get(cognito_user_id, {})
+        
     USERNAME = user_specific_settings.get('USERNAME', 'admin')
     PASSWORD = user_specific_settings.get('PASSWORD', 'password')
-    print(f"Verifying for {cognito_user_id} - USERNAME: {USERNAME}, PASSWORD: {PASSWORD}")  # デバッグ用
+    # print(f"Verifying for {cognito_user_id} - USERNAME: {USERNAME}, PASSWORD: {PASSWORD}")  # デバッグ用
     return username == USERNAME and password == PASSWORD
 
 @app.route('/config/<string:cognito_user_id>', methods=['GET'])
 @auth.login_required
 def config(cognito_user_id):
-    set_cognito_data(cognito_user_id)
-    
-    # まずはデフォルトの設定をロード
-    settings = {
-        'api_key': openai.api_key,
-        'max_requests': max_requests,
-        'reset_time': reset_time,
-        'threshold': threshold,
-        'model': model,
-        'knowledge_about_user': knowledge_about_user,
-        'response_preference': response_preference,        
-        'log_option': log_option,
-        'history_maxlen': history_maxlen,
-        'USERNAME': USERNAME,
-        'PASSWORD': PASSWORD,
-        'questions': "\n".join(questions) if questions else '',
-        'corresponding_ids': "\n".join(corresponding_ids) if corresponding_ids else ''
-    }
+    load_config(cognito_user_id)
+    with settings_lock:  # ロックをかける
+        # まずはデフォルトの設定をロード
+        settings = {
+            'api_key': openai.api_key,
+            'max_requests': max_requests,
+            'reset_time': reset_time,
+            'threshold': threshold,
+            'model': model,
+            'knowledge_about_user': knowledge_about_user,
+            'response_preference': response_preference,        
+            'log_option': log_option,
+            'history_maxlen': history_maxlen,
+            'USERNAME': USERNAME,
+            'PASSWORD': PASSWORD,
+            'questions': "\n".join(questions) if questions else '',
+            'corresponding_ids': "\n".join(corresponding_ids) if corresponding_ids else ''
+        }
     
     # user_settingsから該当するcognito_user_idの設定を取得して上書き
     user_specific_settings = user_settings.get(cognito_user_id, {})
@@ -177,7 +229,7 @@ def config(cognito_user_id):
 
 @app.route('/save_config/<string:cognito_user_id>', methods=['POST'])
 def save_config(cognito_user_id):
-    set_cognito_data(cognito_user_id)
+    settings_path = update_settings_path(cognito_user_id)
     # local variables
     api_key = request.form.get('api_key')
     max_requests_str = request.form.get('max_requests')
@@ -212,12 +264,13 @@ def save_config(cognito_user_id):
         'corresponding_ids': "\n".join(corresponding_ids)
     }
 
-    # Update user_settings dictionary
-    user_settings[cognito_user_id] = new_settings
+    with settings_lock:  # ロックをかける
+        # Update user_settings dictionary
+        user_settings[cognito_user_id] = new_settings
 
-    # Save the settings to a JSON file
-    with open(settings_path, 'w', encoding="utf-8") as f:
-        json.dump(new_settings, f, ensure_ascii=False)
+        # Save the settings to a JSON file
+        with open(settings_path, 'w', encoding="utf-8") as f:
+            json.dump(new_settings, f, ensure_ascii=False)
 
     # Redirect to the configuration page
     return redirect(url_for('config', cognito_user_id=cognito_user_id))
@@ -315,6 +368,15 @@ def message():
     # Lineなど、streamができないものに関してはここで各種pathやconfigを取得する
     if not stream:
         set_cognito_data(cognito_user_id)
+        
+    # キャッシュから値を取得
+    cached_data = cognito_cache.get(cognito_user_id, {})
+    file_path = cached_data.get('file_path')
+    data = cached_data.get('data')
+    documents = cached_data.get('documents')
+    vectors_path = cached_data.get('vectors_path')
+    vectors = cached_data.get('vectors')
+    index = cached_data.get('index')
 
     # cognito_user_idに基づいて設定を取得
     settings = user_settings.get(cognito_user_id, {})
@@ -332,9 +394,8 @@ def message():
     local_corresponding_ids = settings.get('corresponding_ids', corresponding_ids)
     
     print(f"Cognito User ID Check: {cognito_user_id}")
-    print(f"設定path: {settings_path}")
-    print(f"ファイルpath: {file_path}")
-    print(f"ベクトルpath: {vectors_path}")
+    print(f"reference.json path: {file_path}")
+    print(f"vectors.npy path: {vectors_path}")
     
     # Initialize the history for this user or session if it doesn't exist
     if user_id not in history:
