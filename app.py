@@ -8,6 +8,7 @@ import tiktoken
 from collections import deque
 import numpy as np
 import faiss
+from faiss import IndexFlatL2
 import json
 from datetime import datetime, timedelta
 import time
@@ -18,6 +19,7 @@ import os
 import re
 from sklearn.metrics.pairwise import cosine_similarity
 import threading
+from typing import List, Optional, Dict, Any, Deque, cast
 
 openai.api_key = ""
 
@@ -39,8 +41,8 @@ log_option = 'off'
 history_maxlen = 12
 USERNAME = 'admin'
 PASSWORD = 'password'
-questions = []
-corresponding_ids = []
+questions: List[str] = []
+corresponding_ids: List[str] = []
 folder_name = ""
 settings_path = ""
 
@@ -64,8 +66,8 @@ def get_file_path(cognito_user_id):
 
 # vectors.npyの読み込み
 dimension = 1536
-index = None
-vectors = None
+index: Optional[IndexFlatL2] = None
+vectors: Optional[np.ndarray] = None
 
 def load_vectors_and_create_index(cognito_user_id):
     folder_name = generate_folder_name(cognito_user_id)
@@ -80,7 +82,7 @@ def load_vectors_and_create_index(cognito_user_id):
 # キャッシュの有効期限（秒）
 CACHE_EXPIRY = 3600
 # キャッシュ用の辞書
-cognito_cache = {}
+cognito_cache: Dict[str, Any] = {}
 # グローバルロックの作成
 cache_lock = threading.Lock()
 
@@ -143,7 +145,7 @@ def get_cognito_id_route():
 
 # グローバルロックの作成
 settings_lock = threading.Lock()
-user_settings = {}
+user_settings: Dict[str, Any] = {}
 def load_config(cognito_user_id):
     with settings_lock:
         try:
@@ -214,10 +216,10 @@ def config(cognito_user_id):
     settings.update(user_specific_settings)
     
     # MAX_REQUESTSの小数点を省く
-    if settings['max_requests'] == float('inf'):
-        settings['max_requests'] = str(settings['max_requests'])
-    else:
+    if isinstance(settings['max_requests'], (int, float)) and settings['max_requests'] != float('inf'):
         settings['max_requests'] = str(int(settings['max_requests']))
+    else:
+        settings['max_requests'] = 'inf'
     
     # Zip the questions and corresponding_ids
     questions_for_user = user_specific_settings.get('questions', questions)
@@ -233,8 +235,8 @@ def save_config(cognito_user_id):
     # local variables
     api_key = request.form.get('api_key')
     max_requests_str = request.form.get('max_requests')
-    max_requests = float(max_requests_str) if max_requests_str.strip() != '' else float('inf')
-    reset_time = int(request.form.get('reset_time'))
+    max_requests = float(max_requests_str) if max_requests_str and max_requests_str.strip() != '' else float('inf')
+    reset_time = int(request.form.get('reset_time', 0))
     threshold_str = request.form.get('threshold')
     threshold = float(threshold_str) if threshold_str is not None else None
     model = request.form.get('model')
@@ -242,7 +244,7 @@ def save_config(cognito_user_id):
     response_preference = request.form.get('response_preference')
     log_option = request.form.get('log_option')
     history_maxlen_value = request.form.get('history_maxlen')
-    history_maxlen = int(history_maxlen_value) if history_maxlen_value.strip() != '' else float('inf')
+    history_maxlen = int(history_maxlen_value) if history_maxlen_value and history_maxlen_value.strip() != '' else float('inf')
     username = request.form.get('USERNAME')
     password = request.form.get('PASSWORD')
     questions = request.form.getlist('questions[]')
@@ -290,11 +292,11 @@ def trim_to_tokens(text, max_tokens):
         return enc.decode(trimmed_tokens)
 
 # Initialize history and last active time as dictionaries
-history = {}
-last_active = {}
+history: Dict[str, Deque[Dict[str, str]]] = {}
+last_active: Dict[str, Any] = {}
 
 # ユーザーIDとリクエスト数を保存するパラメーター
-user_requests = {}
+user_requests: Dict[str, Dict[str, Any]] = {}
 
 def get_similar_faiss_id(headers, local_model, local_knowledge_about_user, user_message, user_id, history, prefix, combined_list):
     # 既存の履歴から必要なメッセージを抽出
@@ -360,7 +362,7 @@ def get_similar_faiss_id(headers, local_model, local_knowledge_about_user, user_
 def message():
     data = request.get_json()
     user_message = data['message']['text']
-    user_id = data.get("user_id")
+    user_id = str(data.get("user_id", ""))
     session_id = data.get("session_id")
     cognito_user_id = data.get("member_id")
     stream = data.get("stream", False)
@@ -729,10 +731,10 @@ def message():
 
 @app.route('/stream_response', methods=['GET'])
 def stream_response():
-    user_id = cache.get('user_id')
+    user_id = str(cache.get('user_id') or "")
     user_message = cache.get(f"{user_id}_user_message")
-    local_history_maxlen = cache.get(f"{user_id}_local_history_maxlen")
-    user_history = deque(cache.get(f"{user_id}_history") or [], maxlen=local_history_maxlen)
+    local_history_maxlen = int(cache.get(f"{user_id}_local_history_maxlen") or 0)
+    user_history: Deque[Dict[str, str]] = deque(cast(List[Dict[str, str]], cache.get(f"{user_id}_history") or []), maxlen=local_history_maxlen)
     token_limit = cache.get(f"{user_id}_token_limit")
     local_log_option = cache.get(f"{user_id}_local_log_option")
     cognito_user_id = cache.get(f"{user_id}_cognito_user_id")
@@ -740,18 +742,18 @@ def stream_response():
     headers = cache.get(f"{user_id}_headers")
 
     # actual_titlesとactual_urlsがキャッシュに存在する場合に取得
-    actual_titles = cache.get(f"{user_id}_actual_titles") or []
-    actual_urls = cache.get(f"{user_id}_actual_urls") or []
+    actual_titles = list(cache.get(f"{user_id}_actual_titles") or [])
+    actual_urls = list(cache.get(f"{user_id}_actual_urls") or [])
 
     # closest_titles関連の値がキャッシュに存在する場合に取得
-    closest_titles = cache.get(f"{user_id}_closest_titles") or []
-    combined_scores = cache.get(f"{user_id}_combined_scores") or []
+    closest_titles = list(cache.get(f"{user_id}_closest_titles") or [])
+    combined_scores = list(cache.get(f"{user_id}_combined_scores") or [])
     closest_vector_indices = cache.get(f"{user_id}_closest_vector_indices")
     if closest_vector_indices is None or len(closest_vector_indices) == 0:
-        closest_vector_indices = []
+        closest_vector_indices = ""
 
     # matched_idsがキャッシュに存在する場合に取得
-    matched_ids = cache.get(f"{user_id}_matched_ids") or []
+    matched_ids = list(cache.get(f"{user_id}_matched_ids") or [])
 
     def generate():
         print("generate function has started")
@@ -793,9 +795,9 @@ def stream_response():
             print(f"Tokens in final new_message (after AI response): {new_message_tokens}")
 
             # Check if the new message would cause the total tokens to exceed the limit
-            while sum(count_tokens_with_tiktoken(message["content"]) for message in user_history) + new_message_tokens > token_limit:
+            while sum(count_tokens_with_tiktoken(message["content"]) for message in user_history if isinstance(message, dict) and "content" in message) + new_message_tokens > token_limit:
                 # Remove the oldest message from user_history
-                user_history.pop(0)
+                user_history.popleft()
 
             # Add the new message to user_history
             user_history.append(new_message)
