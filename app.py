@@ -577,16 +577,17 @@ def message():
     total_tokens = sum(count_tokens_with_tiktoken(message["content"]) for message in history[user_id])
     print(f"Total tokens: {total_tokens}")
     
-    # Set the token limit based on the model
+    # モデルに基づいてトークン制限を設定
     if local_model == 'gpt-4':
         token_limit = 8000
-    elif local_model == 'gpt-3.5-turbo-16k':
+    elif local_model == 'gpt-3.5-turbo-16k' or local_model == 'gpt-3.5-turbo-1106':
         token_limit = 16000
+    elif local_model == 'gpt-4-1106-preview':
+        token_limit = 128000
     else:
-        token_limit = 4000  # Default
-        local_model
-        
-    print(f"Selected Model and its Token Limit: {local_model, token_limit}")
+        token_limit = 4000
+
+    print(f"選択されたモデルとそのトークン制限: {local_model, token_limit}")
 
     # Define trimmed_content before the loop
     new_message = {"role": "assistant", "content": ""}
