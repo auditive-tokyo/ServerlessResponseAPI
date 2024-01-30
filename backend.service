@@ -1,0 +1,15 @@
+[Unit]
+Description=DeepFaissChat
+After=network.target
+
+[Service]
+User=ec2-user
+Group=ec2-user
+WorkingDirectory=/home/ec2-user/backend
+LimitNOFILE=4096
+ExecStart=/home/ec2-user/backend/myenv/bin/python /home/ec2-user/backend/app.py
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
