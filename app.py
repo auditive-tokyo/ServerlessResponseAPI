@@ -20,6 +20,14 @@ import re
 from sklearn.metrics.pairwise import cosine_similarity
 import threading
 from typing import List, Optional, Dict, Any, Deque, cast
+import logging
+from logging.handlers import RotatingFileHandler
+
+# ロガーの設定
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+handler = RotatingFileHandler('app.log', maxBytes=5*1024*1024, backupCount=10)
+logger.addHandler(handler)
 
 openai.api_key = ""
 
@@ -96,7 +104,7 @@ def check_cache_expiry():
                     keys_to_delete.append(cognito_user_id)
             for key in keys_to_delete:
                 del cognito_cache[key]
-                print(f"Cache for Cognito user ID {key} has been cleared.")
+                logger.info(f"Cache for Cognito user ID {key} has been cleared.")
         time.sleep(CACHE_EXPIRY)
 
 # スレッドを起動
@@ -115,7 +123,7 @@ def set_cognito_data(cognito_user_id):
         # vectors_pathの更新
         vectors_path, vectors, index = load_vectors_and_create_index(cognito_user_id)
     except Exception as e:
-        print(f"Error in set_cognito_data: {e}")
+        logger.error(f"Error in set_cognito_data: {e}")
         return None
 
     with cache_lock: 
@@ -136,11 +144,11 @@ def get_cognito_id_route():
         cognito_user_id = request.form.get("member_id")
         result = set_cognito_data(cognito_user_id)
         if result is None:
-            print("Failed to set cognito data")
+            logger.warning("Failed to set cognito data")
             return "Failed to set cognito data", 500
         return cognito_user_id
     except Exception as e:
-        print(f"Error in get_cognito_id_route: {e}")
+        logger.error(f"Error in get_cognito_id_route: {e}")
         return "Internal Server Error", 500
 
 # グローバルロックの作成
@@ -173,7 +181,7 @@ def load_config(cognito_user_id):
             # print("File not found.")  # デバッグ用
             pass  # ファイルが見つからない場合は特に何もしない
         except Exception as e:
-            print(f"Error in load_config: {e}")
+            logger.error(f"Error in load_config: {e}")
 
 auth = HTTPBasicAuth()
 
@@ -332,16 +340,16 @@ def get_similar_faiss_id(headers, local_model, local_knowledge_about_user, user_
     ])
     
     # メッセージの内容を表示
-    print("==== Messages List Content ====")
+    logger.info("==== Messages List Content ====")
     for msg in messages:
-        print(f"Role: {msg['role']}")
+        logger.info(f"Role: {msg['role']}")
         if "questions and their corresponding IDs:" in msg['content']:
             pre_text, post_text = msg['content'].split("questions and their corresponding IDs:")
-            print(f"Content: {pre_text}questions and their corresponding IDs:")
-            print(post_text)  # combined_listの部分をそのまま表示
+            logger.info(f"Content: {pre_text}questions and their corresponding IDs:")
+            logger.info(post_text)  # combined_listの部分をそのまま表示
         else:
-            print(f"Content: {msg['content']}")
-    print("===============================")
+            logger.info(f"Content: {msg['content']}")
+    logger.info("===============================")
 
     # OpenAIのAPIを使用してユーザーメッセージと質問の類似度を計算
     response = openai.ChatCompletion.create(
@@ -350,11 +358,11 @@ def get_similar_faiss_id(headers, local_model, local_knowledge_about_user, user_
         headers=headers,
         temperature=0.0
     )
-    print(f"OpenAI API Response: {response.choices[0].message['content']}")
+    logger.info(f"OpenAI API Response: {response.choices[0].message['content']}")
     
     # レスポンスからIDを抽出
     matched_ids = re.findall(r'\d+', response.choices[0].message['content'])
-    print(f"Matched IDs: {matched_ids}")
+    logger.info(f"Matched IDs: {matched_ids}")
     
     return matched_ids[:4]  # 最初の4つのIDを返す
 
@@ -395,9 +403,9 @@ def message():
     local_questions = settings.get('questions', questions)
     local_corresponding_ids = settings.get('corresponding_ids', corresponding_ids)
     
-    print(f"Cognito User ID Check: {cognito_user_id}")
-    print(f"reference.json path: {file_path}")
-    print(f"vectors.npy path: {vectors_path}")
+    logger.info(f"Cognito User ID Check: {cognito_user_id}")
+    logger.info(f"reference.json path: {file_path}")
+    logger.info(f"vectors.npy path: {vectors_path}")
     
     # Initialize the history for this user or session if it doesn't exist
     if user_id not in history:
@@ -407,12 +415,12 @@ def message():
             history[user_id] = deque(maxlen=local_history_maxlen)
         last_active[user_id] = datetime.now()
     else:
-        print(f"Current history length for user {user_id}: {len(history[user_id])}")
+        logger.info(f"Current history length for user {user_id}: {len(history[user_id])}")
     
     # Print the user ID and session ID
-    print(f"User ID: {user_id}")
-    print(f"Session ID: {session_id}")
-    print(f"User message from user {user_id}: {user_message}") 
+    logger.info(f"User ID: {user_id}")
+    logger.info(f"Session ID: {session_id}")
+    logger.info(f"User message from user {user_id}: {user_message}") 
 
     # ユーザーIDが存在しない場合は初期化
     if user_id not in user_requests:
@@ -457,9 +465,9 @@ def message():
     if combined_list:
         # get_similar_faiss_id関数を呼び出す
         matched_ids = get_similar_faiss_id(headers, local_model, local_knowledge_about_user, user_message, user_id, history, prefix, combined_list)
-        print(f"Returned Matched IDs: {matched_ids}")
+        logger.info(f"Returned Matched IDs: {matched_ids}")
     else:
-        print("No questions and corresponding IDs provided. Skipping the Q&IDs process.")
+        logger.info("No questions and corresponding IDs provided. Skipping the Q&IDs process.")
         
     # 参照IDを逆にする一時的なリスト（重要度が低い方から先にhistory.appendする）
     temp_references = []
@@ -496,7 +504,7 @@ def message():
                 headers=headers
             )
         except Exception as e:
-            print(f"Error while embedding user message: {e}")
+            logger.error(f"Error while embedding user message: {e}")
             return jsonify({"error": "Failed to process user message."}), 500
         
         # print(f"Embedding result: {embedding_result}") # 不要になったら消す
@@ -506,7 +514,7 @@ def message():
         try:
             D, I = index.search(np.array([user_message_vector], dtype=np.float32), 10)
         except Exception as e:
-            print(f"Error while searching the index: {e}")
+            logger.error(f"Error while searching the index: {e}")
             return jsonify({"error": "Failed to search the database."}), 500
 
         # D contains the distances to the n closest vectors in the dataset
@@ -520,8 +528,8 @@ def message():
         closest_documents = [documents[i]["text"] for i in closest_vector_indices]
         closest_titles = [documents[i]["title"] for i in closest_vector_indices]
         closest_urls = [documents[i]["url"] for i in closest_vector_indices]
-        print(f"Closest document FAISS IDs (adjusted for CSV): {[idx + 2 for idx in closest_vector_indices]}")
-        print(f"Closest document titles: {closest_titles}")
+        logger.info(f"Closest document FAISS IDs (adjusted for CSV): {[idx + 2 for idx in closest_vector_indices]}")
+        logger.info(f"Closest document titles: {closest_titles}")
         # print(f"Closest document urls: {closest_urls}")
 
         # コサイン類似性を計算する部分を組み込む
@@ -534,12 +542,12 @@ def message():
                 similarities.append(similarity)
                 # print(f"Title: {title}, Similarity: {similarity}")  # タイトルとその類似性を出力
             else:
-                print(f"Document not found in reference list: {title}")
+                logger.warning(f"Document not found in reference list: {title}")
                 similarities.append(0)
 
         # 距離スコアとコサイン類似性のスコアを組み合わせて新しいスコアを計算
         combined_scores = [0.5 * (1 - scaled_distance) + 0.5 * similarity for scaled_distance, similarity in zip(closest_vector_distances, similarities)]
-        print("Combined scores (Scaled FAISS distance + Cosine similarity):", combined_scores)
+        logger.info("Combined scores (Scaled FAISS distance + Cosine similarity):", combined_scores)
 
         # Thresholdを超えたIDを履歴に追加
         # スコアと関連する情報を同時にソート
@@ -556,8 +564,8 @@ def message():
                 actual_titles.append(title)
                 actual_urls.append(url)
                 
-                print("Actual Referred titles: ", title)
-                print("Actual Referred urls: ", url)
+                logger.info("Actual Referred titles: ", title)
+                logger.info("Actual Referred urls: ", url)
                 
                 document_content = f"{title} {doc})"
                 reference_content = f"{prefix} {document_content}"
@@ -575,7 +583,7 @@ def message():
  
     # Calculate the total tokens for messages in history[user_id]
     total_tokens = sum(count_tokens_with_tiktoken(message["content"]) for message in history[user_id])
-    print(f"Total tokens: {total_tokens}")
+    logger.info(f"Total tokens: {total_tokens}")
     
     # モデルに基づいてトークン制限を設定
     if local_model == 'gpt-4':
@@ -587,7 +595,7 @@ def message():
     else:
         token_limit = 4000
 
-    print(f"選択されたモデルとそのトークン制限: {local_model, token_limit}")
+    logger.info(f"選択されたモデルとそのトークン制限: {local_model, token_limit}")
 
     # Define trimmed_content before the loop
     new_message = {"role": "assistant", "content": ""}
@@ -639,9 +647,10 @@ def message():
                 headers=headers
             )
         except ServiceUnavailableError:
+            logger.error("The server is overloaded or not ready yet. Please try again later.")
             return jsonify({"error": "The server is overloaded or not ready yet. Please try again later."}), 503
         except Exception as e:
-            print(f"Error while generating chat completion: {e}")
+            logger.error(f"Error while generating chat completion: {e}")
             return jsonify({"error": "Failed to generate a response."}), 500
 
         # AIのレスポンスに参照を追加する
@@ -658,7 +667,7 @@ def message():
 
         # トリム後のトークン数を確認
         new_message_tokens = count_tokens_with_tiktoken(new_message["content"])
-        print(f"Tokens in final new_message (after AI response): {new_message_tokens}")
+        logger.info(f"Tokens in final new_message (after AI response): {new_message_tokens}")
 
         # Check if the new message would cause the total tokens to exceed the limit
         while sum(count_tokens_with_tiktoken(message["content"]) for message in history[user_id]) + count_tokens_with_tiktoken(new_message["content"]) > token_limit:
@@ -677,7 +686,7 @@ def message():
         full_response_content = ""
         log_data(cognito_user_id, local_log_option, user_message, response, full_response_content, actual_urls, closest_titles, combined_scores, closest_vector_indices, matched_ids)
 
-        print(f"Conversation history for user {user_id}: {history[user_id]}")
+        logger.info(f"Conversation history for user {user_id}: {history[user_id]}")
 
     else:        
         # 必要な値をキャッシュに保存
@@ -721,7 +730,7 @@ def message():
             cache.set(f"{user_id}_headers", headers)
 
         # フラグを含むJSONレスポンスを返す
-        print("Sending ready_for_stream flag to frontend.")
+        logger.info("Sending ready_for_stream flag to frontend.")
         return jsonify({"ready_for_stream": True})
 
     response_data = {'message': new_message['content']}
@@ -757,16 +766,16 @@ def stream_response():
     matched_ids = list(cache.get(f"{user_id}_matched_ids") or [])
 
     def generate():
-        print("generate function has started")
+        logger.info("generate function has started")
         try:
-            print("Attempting to create a streaming response...")
+            logger.info("Attempting to create a streaming response...")
             response_stream = openai.ChatCompletion.create(
                 model=local_model,
                 messages=list(user_history),
                 headers=headers,
                 stream=True
             )
-            print("Streaming response created successfully.")
+            logger.info("Streaming response created successfully.")
             
             full_response_content = ""  # AIからの完全なレスポンスを保存するための変数
 
@@ -793,7 +802,7 @@ def stream_response():
 
             # トリム後のトークン数を確認
             new_message_tokens = count_tokens_with_tiktoken(new_message["content"])
-            print(f"Tokens in final new_message (after AI response): {new_message_tokens}")
+            logger.info(f"Tokens in final new_message (after AI response): {new_message_tokens}")
 
             # Check if the new message would cause the total tokens to exceed the limit
             while sum(count_tokens_with_tiktoken(message["content"]) for message in user_history if isinstance(message, dict) and "content" in message) + new_message_tokens > token_limit:
@@ -809,12 +818,12 @@ def stream_response():
             # Update the global history with the user's updated history
             history[user_id] = user_history
 
-            print(f"Conversation history for user {user_id}: {history[user_id]}")
+            logger.info(f"Conversation history for user {user_id}: {history[user_id]}")
 
         except ServiceUnavailableError:
             yield f"data: {json.dumps({'error': 'The server is overloaded or not ready yet. Please try again later.'})}\n\n"
         except Exception as e:
-            print(f"Error while generating chat completion: {e}")
+            logger.error(f"Error while generating chat completion: {e}")
             yield f"data: {json.dumps({'error': 'Failed to generate a response.'})}\n\n"
 
     # 関数の最後でキャッシュを削除
@@ -856,11 +865,11 @@ def stream_response():
         response.headers['Expires'] = '0'
         return response
     except Exception as e:
-        print(f"Error when calling generate function: {e}")
+        logger.error(f"Error when calling generate function: {e}")
 
 
 def log_data(cognito_user_id, local_log_option, user_message, response, full_response_content, actual_urls, closest_titles, combined_scores, closest_vector_indices, matched_ids):
-    print(f"logdata has started with log_option: {local_log_option} and matched_ids: {matched_ids}")
+    logger.info(f"logdata has started with log_option: {local_log_option} and matched_ids: {matched_ids}")
     
     if local_log_option == 'fine_tune':
         try:
@@ -887,7 +896,7 @@ def log_data(cognito_user_id, local_log_option, user_message, response, full_res
                     'completion': ai_response_content
                 })
         except Exception as e:
-            print(f"Error while logging in 'fine_tune' option: {e}")
+            logger.error(f"Error while logging in 'fine_tune' option: {e}")
 
     elif local_log_option == 'vector_score_log' and not matched_ids:
         try:
@@ -924,9 +933,9 @@ def log_data(cognito_user_id, local_log_option, user_message, response, full_res
                         'ai_response': ai_response_content
                     })
                 
-                print("Finished writing to file.")
+                logger.info("Finished writing to file.")
         except Exception as e:
-            print(f"Error while logging in 'vector_score_log' option: {e}")
+            logger.error(f"Error while logging in 'vector_score_log' option: {e}")
 
 
 if __name__ == "__main__":
