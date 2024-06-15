@@ -4,30 +4,24 @@ from flask_caching import Cache
 from flask_cors import CORS
 import openai
 from openai.error import ServiceUnavailableError
-import tiktoken
 from collections import deque
 import numpy as np
-import faiss
-from faiss import IndexFlatL2
 import json
 from datetime import datetime, timedelta
 import time
-import csv
 from langdetect import detect
 import validators
 import os
 import re
 from sklearn.metrics.pairwise import cosine_similarity
 import threading
-from typing import List, Optional, Dict, Any, Deque, cast
-import logging
-from logging.handlers import RotatingFileHandler
-
-# ロガーの設定
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-handler = RotatingFileHandler('app.log', maxBytes=5*1024*1024, backupCount=10)
-logger.addHandler(handler)
+from typing import List, Dict, Any, Deque, cast
+from src.functions.logdata import log_data
+from src.utils.token_utils import count_tokens_with_tiktoken, trim_to_tokens
+from src.schema.logging_config import logger
+from src.utils.file_utils import update_settings_path, get_file_path
+from src.functions.vector_handling import load_vectors_and_create_index
+from src.functions.stream_response import generate
 
 openai.api_key = ""
 
@@ -42,7 +36,7 @@ local_data = threading.local()
 max_requests = float('inf')
 reset_time = 3600
 threshold = 0.7
-model = 'gpt-3.5-turbo-16k'
+model = 'gpt-3.5-turbo-0125'
 knowledge_about_user = ""
 response_preference = ""
 log_option = 'off'
@@ -51,41 +45,6 @@ USERNAME = 'admin'
 PASSWORD = 'password'
 questions: List[str] = []
 corresponding_ids: List[str] = []
-folder_name = ""
-settings_path = ""
-
-# Cognito IDから動的にフォルダー名を設定する
-def generate_folder_name(cognito_user_id):
-    return f"dir_{cognito_user_id}"
-
-def update_settings_path(cognito_user_id):
-    folder_name = generate_folder_name(cognito_user_id)
-    settings_path = os.path.join(os.path.dirname(__file__), folder_name, 'settings.json')
-    return settings_path
-    
-# reference.jsonの読み込み
-def get_file_path(cognito_user_id):
-    folder_name = generate_folder_name(cognito_user_id)
-    file_path = os.path.join(os.path.dirname(__file__), folder_name, 'reference.json')
-    with open(file_path, 'r') as f:
-        data = json.load(f)
-        documents = data
-    return file_path, data, documents
-
-# vectors.npyの読み込み
-dimension = 1536
-index: Optional[IndexFlatL2] = None
-vectors: Optional[np.ndarray] = None
-
-def load_vectors_and_create_index(cognito_user_id):
-    folder_name = generate_folder_name(cognito_user_id)
-    vectors_path = os.path.join(os.path.dirname(__file__), folder_name, 'vectors.npy')
-    vectors = np.load(vectors_path)
-    
-    index = faiss.IndexFlatL2(dimension)
-    index.add(vectors)
-    
-    return vectors_path, vectors, index
 
 # キャッシュの有効期限（秒）
 CACHE_EXPIRY = 3600
@@ -164,7 +123,7 @@ def load_config(cognito_user_id):
                 # print(f"Loaded config: {config}")  # デバッグ用
                 user_settings[cognito_user_id] = {
                     'api_key': config.get('api_key', openai.api_key),
-                    'max_requests': float(config.get('max_requests', max_requests)),
+                    'max_requests': float(config.get('max_requests', max_requests)) if config.get('max_requests') != "Infinity" else float('inf'),
                     'reset_time': int(config.get('reset_time', reset_time)),
                     'threshold': float(config.get('threshold', threshold)),
                     'model': config.get('model', model),
@@ -260,7 +219,7 @@ def save_config(cognito_user_id):
 
     new_settings = {
         'api_key': api_key,
-        'max_requests': max_requests,
+        'max_requests': "Infinity" if max_requests == float('inf') else max_requests,
         'reset_time': reset_time,
         'threshold': threshold,
         'model': model,
@@ -284,20 +243,6 @@ def save_config(cognito_user_id):
 
     # Redirect to the configuration page
     return redirect(url_for('config', cognito_user_id=cognito_user_id))
-
-# OpenAIのモデルに対応するトークナイザを取得
-enc = tiktoken.get_encoding("cl100k_base")
-
-def count_tokens_with_tiktoken(text):
-    return len(enc.encode(text))
-
-def trim_to_tokens(text, max_tokens):
-    tokens = enc.encode(text)
-    if len(tokens) <= max_tokens:
-        return text
-    else:
-        trimmed_tokens = tokens[:max_tokens]
-        return enc.decode(trimmed_tokens)
 
 # Initialize history and last active time as dictionaries
 history: Dict[str, Deque[Dict[str, str]]] = {}
@@ -547,7 +492,7 @@ def message():
 
         # 距離スコアとコサイン類似性のスコアを組み合わせて新しいスコアを計算
         combined_scores = [0.5 * (1 - scaled_distance) + 0.5 * similarity for scaled_distance, similarity in zip(closest_vector_distances, similarities)]
-        logger.info("Combined scores (Scaled FAISS distance + Cosine similarity):", combined_scores)
+        logger.info(f"Combined scores (Scaled FAISS distance + Cosine similarity): {combined_scores}")
 
         # Thresholdを超えたIDを履歴に追加
         # スコアと関連する情報を同時にソート
@@ -564,8 +509,8 @@ def message():
                 actual_titles.append(title)
                 actual_urls.append(url)
                 
-                logger.info("Actual Referred titles: ", title)
-                logger.info("Actual Referred urls: ", url)
+                logger.info(f"Actual Referred titles: {title}")
+                logger.info(f"Actual Referred urls: {url}")
                 
                 document_content = f"{title} {doc})"
                 reference_content = f"{prefix} {document_content}"
@@ -765,67 +710,6 @@ def stream_response():
     # matched_idsがキャッシュに存在する場合に取得
     matched_ids = list(cache.get(f"{user_id}_matched_ids") or [])
 
-    def generate():
-        logger.info("generate function has started")
-        try:
-            logger.info("Attempting to create a streaming response...")
-            response_stream = openai.ChatCompletion.create(
-                model=local_model,
-                messages=list(user_history),
-                headers=headers,
-                stream=True
-            )
-            logger.info("Streaming response created successfully.")
-            
-            full_response_content = ""  # AIからの完全なレスポンスを保存するための変数
-
-            for chunk in response_stream:
-                # print(f"Received chunk: {json.dumps(chunk, ensure_ascii=False, indent=2)}")
-                if 'content' in chunk['choices'][0]['delta']:
-                    content = chunk['choices'][0]['delta']['content']
-                    full_response_content += content  # レスポンスを連結
-                    
-                    yield f"data: {json.dumps({'content': content})}\n\n"
-
-            # AIのレスポンスに参照を追加する
-            if actual_titles:
-                references = ""
-                for title, url in zip(actual_titles, actual_urls):
-                    if validators.url(url):
-                        references += f'<br><br><a href="{url}" target="_blank">{title}</a>'
-                    else:
-                        references += f'<br><br>{title} ({url})'
-                new_message = {"role": "assistant", "content": full_response_content + references}
-                yield f"data: {json.dumps({'content': references})}\n\n"
-            else:
-                new_message = {"role": "assistant", "content": full_response_content}
-
-            # トリム後のトークン数を確認
-            new_message_tokens = count_tokens_with_tiktoken(new_message["content"])
-            logger.info(f"Tokens in final new_message (after AI response): {new_message_tokens}")
-
-            # Check if the new message would cause the total tokens to exceed the limit
-            while sum(count_tokens_with_tiktoken(message["content"]) for message in user_history if isinstance(message, dict) and "content" in message) + new_message_tokens > token_limit:
-                # Remove the oldest message from user_history
-                user_history.popleft()
-
-            # Add the new message to user_history
-            user_history.append(new_message)
-            
-            response = ""
-            log_data(cognito_user_id, local_log_option, user_message, response, full_response_content, actual_urls, closest_titles, combined_scores, closest_vector_indices, matched_ids)
-            
-            # Update the global history with the user's updated history
-            history[user_id] = user_history
-
-            logger.info(f"Conversation history for user {user_id}: {history[user_id]}")
-
-        except ServiceUnavailableError:
-            yield f"data: {json.dumps({'error': 'The server is overloaded or not ready yet. Please try again later.'})}\n\n"
-        except Exception as e:
-            logger.error(f"Error while generating chat completion: {e}")
-            yield f"data: {json.dumps({'error': 'Failed to generate a response.'})}\n\n"
-
     # 関数の最後でキャッシュを削除
     if cache.get('user_id'):
         cache.delete('user_id')
@@ -859,83 +743,29 @@ def stream_response():
         cache.delete(f"{user_id}_matched_ids")
 
     try:
-        response = Response(stream_with_context(generate()), content_type='text/event-stream')
+        response = Response(stream_with_context(generate(
+            user_id=user_id,
+            user_message=user_message,
+            user_history=user_history,
+            token_limit=token_limit,
+            local_log_option=local_log_option,
+            cognito_user_id=cognito_user_id,
+            local_model=local_model,
+            headers=headers,
+            actual_titles=actual_titles,
+            actual_urls=actual_urls,
+            closest_titles=closest_titles,
+            combined_scores=combined_scores,
+            closest_vector_indices=closest_vector_indices,
+            matched_ids=matched_ids,
+            history=history  # ここでhistoryを渡す
+        )), content_type='text/event-stream')
         response.headers['Cache-Control'] = 'no-cache'
         response.headers['Pragma'] = 'no-cache'
         response.headers['Expires'] = '0'
         return response
     except Exception as e:
         logger.error(f"Error when calling generate function: {e}")
-
-
-def log_data(cognito_user_id, local_log_option, user_message, response, full_response_content, actual_urls, closest_titles, combined_scores, closest_vector_indices, matched_ids):
-    logger.info(f"logdata has started with log_option: {local_log_option} and matched_ids: {matched_ids}")
-    
-    if local_log_option == 'fine_tune':
-        try:
-            # Check if the file is empty (i.e., if it's a new file)
-            log_data_path = os.path.join(os.path.dirname(__file__), f"dir_{cognito_user_id}", 'fine_tuning_data.csv')
-            is_new_file = not os.path.exists(log_data_path) or os.stat(log_data_path).st_size == 0
-
-            # Log the user messages and AI responses to a CSV file
-            with open(log_data_path, 'a', newline='') as file:
-                fieldnames = ['prompt', 'completion']
-                writer = csv.DictWriter(file, fieldnames=fieldnames)
-
-                # Write the header only if the file is new
-                if is_new_file:
-                    writer.writeheader()
-
-                if 'choices' in response:  # responseがstreamでない場合
-                    ai_response_content = response['choices'][0]['message']['content']
-                else:  # responseがstreamの場合
-                    ai_response_content = full_response_content
-     
-                writer.writerow({
-                    'prompt': user_message,
-                    'completion': ai_response_content
-                })
-        except Exception as e:
-            logger.error(f"Error while logging in 'fine_tune' option: {e}")
-
-    elif local_log_option == 'vector_score_log' and not matched_ids:
-        try:
-            # Check if the file is empty (i.e., if it's a new file)
-            log_data_path = os.path.join(os.path.dirname(__file__), f"dir_{cognito_user_id}", 'vector_score.csv')
-            is_new_file = not os.path.exists(log_data_path) or os.stat(log_data_path).st_size == 0
-
-            # Log the distances and URLs etc... to a CSV file
-            with open(log_data_path, 'a', newline='') as file:
-                fieldnames = ['user_message', 'title', 'id', 'score', 'actual_referred_urls', 'ai_response']
-                writer = csv.DictWriter(file, fieldnames=fieldnames)
-
-                # Write the header only if the file is new
-                if is_new_file:
-                    writer.writeheader()
-
-                # Ensure all lists have the same length
-                while len(actual_urls) < len(closest_titles):
-                    actual_urls.append(None)
-
-                adjusted_ids = [idx + 2 for idx in closest_vector_indices]
-                for title, each_score, each_url, adj_id in zip(closest_titles, combined_scores, actual_urls, adjusted_ids):
-                    
-                    if 'choices' in response:  # responseがstreamでない場合
-                        ai_response_content = response['choices'][0]['message']['content']
-                    else:  # responseがstreamの場合
-                        ai_response_content = full_response_content
-                    writer.writerow({
-                        'user_message': user_message, 
-                        'title': title,
-                        'id': adj_id,
-                        'score': each_score,
-                        'actual_referred_urls': each_url,
-                        'ai_response': ai_response_content
-                    })
-                
-                logger.info("Finished writing to file.")
-        except Exception as e:
-            logger.error(f"Error while logging in 'vector_score_log' option: {e}")
 
 
 if __name__ == "__main__":
