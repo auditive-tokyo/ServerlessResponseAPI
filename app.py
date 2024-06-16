@@ -3,25 +3,24 @@ from flask_httpauth import HTTPBasicAuth
 from flask_caching import Cache
 from flask_cors import CORS
 import openai
-from openai.error import ServiceUnavailableError
 from collections import deque
 import numpy as np
 import json
 from datetime import datetime, timedelta
 import time
 from langdetect import detect
-import validators
 import os
-import re
 from sklearn.metrics.pairwise import cosine_similarity
 import threading
 from typing import List, Dict, Any, Deque, cast
-from src.functions.logdata import log_data
 from src.utils.token_utils import count_tokens_with_tiktoken, trim_to_tokens
 from src.schema.logging_config import logger
 from src.utils.file_utils import update_settings_path, get_file_path
 from src.functions.vector_handling import load_vectors_and_create_index
 from src.functions.stream_response import generate
+from src.functions.get_similar_faiss_id import get_similar_faiss_id
+from src.functions.embedding import embedding_user_message
+from src.functions.unstreamed_response import generate_chat_response, process_chat_response
 
 openai.api_key = ""
 
@@ -251,65 +250,6 @@ last_active: Dict[str, Any] = {}
 # ユーザーIDとリクエスト数を保存するパラメーター
 user_requests: Dict[str, Dict[str, Any]] = {}
 
-def get_similar_faiss_id(headers, local_model, local_knowledge_about_user, user_message, user_id, history, prefix, combined_list):
-    # 既存の履歴から必要なメッセージを抽出
-    messages = []
-
-    relevant_messages = [
-        msg for msg in history.get(user_id, []) 
-        if msg["role"] in ["user", "assistant"] and not msg["content"].startswith(prefix)
-    ]
-
-    # 過去の会話履歴が存在する場合のみ、過去の会話履歴を文字列として結合し、メッセージとして追加
-    if relevant_messages:
-        past_conversation = "\n".join([f"Role: {msg['role']}\nContent: {msg['content']}" for msg in relevant_messages])
-        messages.append({"role": "system", "content": f"Here is the past conversation of this user, use it if it helps understanding the context of user's query:\n{past_conversation}\n"})
-    
-    # ユーザーの背景情報をシステムメッセージとして追加
-    if local_knowledge_about_user:
-        messages.append({
-            "role": "system",
-            "content": f"You are the knowledgeable assistant of following entity or association: \n{local_knowledge_about_user}\n"
-        })
-    
-    # ユーザーのクエリに関する指示を追加
-    instruction = (
-        f"Given the user's query, identify and return the numeric ID(s) from the list of questions and their corresponding IDs: \n{combined_list}.\n\n"
-        "If the context of the user's question matches any of the listed questions, return the corresponding ID(s). "
-        "Remember to return ONLY the numeric ID(s). If there's no match, return 'None'. You MUST NOT reply to the user's message directly, NOR ASK for further clarification.\n"
-    )
-    
-    messages.extend([
-        {"role": "system", "content": instruction},
-        {"role": "user", "content": user_message}
-    ])
-    
-    # メッセージの内容を表示
-    logger.info("==== Messages List Content ====")
-    for msg in messages:
-        logger.info(f"Role: {msg['role']}")
-        if "questions and their corresponding IDs:" in msg['content']:
-            pre_text, post_text = msg['content'].split("questions and their corresponding IDs:")
-            logger.info(f"Content: {pre_text}questions and their corresponding IDs:")
-            logger.info(post_text)  # combined_listの部分をそのまま表示
-        else:
-            logger.info(f"Content: {msg['content']}")
-    logger.info("===============================")
-
-    # OpenAIのAPIを使用してユーザーメッセージと質問の類似度を計算
-    response = openai.ChatCompletion.create(
-        model=local_model,
-        messages=messages,
-        headers=headers,
-        temperature=0.0
-    )
-    logger.info(f"OpenAI API Response: {response.choices[0].message['content']}")
-    
-    # レスポンスからIDを抽出
-    matched_ids = re.findall(r'\d+', response.choices[0].message['content'])
-    logger.info(f"Matched IDs: {matched_ids}")
-    
-    return matched_ids[:4]  # 最初の4つのIDを返す
 
 @app.route('/message', methods=['POST'])
 def message():
@@ -438,22 +378,10 @@ def message():
                 document_content = f"{matched_title} {matched_text}"
                 temp_references.append({"role": "assistant", "content": f"{prefix} {document_content}"})
 
-    else: 
-        # Vectorize the user's message using OpenAI's model
-        user_message_to_encode = user_message
-
-        try:
-            embedding_result = openai.Embedding.create(
-                model="text-embedding-ada-002",
-                input=user_message_to_encode,
-                headers=headers
-            )
-        except Exception as e:
-            logger.error(f"Error while embedding user message: {e}")
+    else:         
+        user_message_vector = embedding_user_message(user_message, headers)
+        if user_message_vector is None:  # エラーレスポンスが返された場合
             return jsonify({"error": "Failed to process user message."}), 500
-        
-        # print(f"Embedding result: {embedding_result}") # 不要になったら消す
-        user_message_vector = embedding_result['data'][0]['embedding']
 
         # Query the index with the user's message vector
         try:
@@ -585,53 +513,11 @@ def message():
     history[user_id].append({"role": "user", "content": user_message})
     
     if not stream:
-        try:
-            response = openai.ChatCompletion.create(
-                model=local_model,
-                messages=list(history[user_id]),
-                headers=headers
-            )
-        except ServiceUnavailableError:
-            logger.error("The server is overloaded or not ready yet. Please try again later.")
-            return jsonify({"error": "The server is overloaded or not ready yet. Please try again later."}), 503
-        except Exception as e:
-            logger.error(f"Error while generating chat completion: {e}")
-            return jsonify({"error": "Failed to generate a response."}), 500
+        response, error_response = generate_chat_response(local_model, history, user_id, headers)
+        if error_response:
+            return error_response
 
-        # AIのレスポンスに参照を追加する
-        if actual_titles:
-            references = ""
-            for title, url in zip(actual_titles, actual_urls):
-                if validators.url(url):
-                    references += f'<br><br><a href="{url}" target="_blank">{title}</a>'
-                else:
-                    references += f'<br><br>{title} ({url})'
-            new_message = {"role": "assistant", "content": response['choices'][0]['message']['content'] + references}
-        else:
-            new_message = {"role": "assistant", "content": response['choices'][0]['message']['content']}
-
-        # トリム後のトークン数を確認
-        new_message_tokens = count_tokens_with_tiktoken(new_message["content"])
-        logger.info(f"Tokens in final new_message (after AI response): {new_message_tokens}")
-
-        # Check if the new message would cause the total tokens to exceed the limit
-        while sum(count_tokens_with_tiktoken(message["content"]) for message in history[user_id]) + count_tokens_with_tiktoken(new_message["content"]) > token_limit:
-            # Remove the oldest message
-            history[user_id].popleft()
-
-        # Add the new message
-        history[user_id].append(new_message)
-        
-        # get_similar_faiss_id関数でmatched_idがあった場合は初期化
-        if 'closest_titles' not in locals():
-            closest_titles = []
-            combined_scores = []
-            closest_vector_indices = []
-        
-        full_response_content = ""
-        log_data(cognito_user_id, local_log_option, user_message, response, full_response_content, actual_urls, closest_titles, combined_scores, closest_vector_indices, matched_ids)
-
-        logger.info(f"Conversation history for user {user_id}: {history[user_id]}")
+        new_message = process_chat_response(response, actual_titles, actual_urls, history, user_id, token_limit, local_log_option, user_message, cognito_user_id, matched_ids)
 
     else:        
         # 必要な値をキャッシュに保存
@@ -758,7 +644,7 @@ def stream_response():
             combined_scores=combined_scores,
             closest_vector_indices=closest_vector_indices,
             matched_ids=matched_ids,
-            history=history  # ここでhistoryを渡す
+            history=history
         )), content_type='text/event-stream')
         response.headers['Cache-Control'] = 'no-cache'
         response.headers['Pragma'] = 'no-cache'
