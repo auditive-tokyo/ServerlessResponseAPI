@@ -21,6 +21,9 @@ from src.functions.stream_response import generate
 from src.functions.get_similar_faiss_id import get_similar_faiss_id
 from src.functions.embedding import embedding_user_message
 from src.functions.unstreamed_response import generate_chat_response, process_chat_response
+from src.utils.cache_utils import check_cache_expiry, cache_lock, cognito_cache, CACHE_EXPIRY
+from src.utils.cognito_utils import set_cognito_data
+from src.schema.config_manager import load_config, settings_lock, user_settings, DEFAULT_MAX_REQUESTS, DEFAULT_RESET_TIME, DEFAULT_THRESHOLD, DEFAULT_MODEL, DEFAULT_KNOWLEDGE_ABOUT_USER, DEFAULT_RESPONSE_PREFERENCE, DEFAULT_LOG_OPTION, DEFAULT_HISTORY_MAXLEN, DEFAULT_USERNAME, DEFAULT_PASSWORD
 
 openai.api_key = ""
 
@@ -32,69 +35,23 @@ CORS(app)
 local_data = threading.local()
 
 # Global variables
-max_requests = float('inf')
-reset_time = 3600
-threshold = 0.7
-model = 'gpt-3.5-turbo-0125'
-knowledge_about_user = ""
-response_preference = ""
-log_option = 'off'
-history_maxlen = 12
-USERNAME = 'admin'
-PASSWORD = 'password'
+max_requests = DEFAULT_MAX_REQUESTS
+reset_time = DEFAULT_RESET_TIME
+threshold = DEFAULT_THRESHOLD
+model = DEFAULT_MODEL
+knowledge_about_user = DEFAULT_KNOWLEDGE_ABOUT_USER
+response_preference = DEFAULT_RESPONSE_PREFERENCE
+log_option = DEFAULT_LOG_OPTION
+history_maxlen = DEFAULT_HISTORY_MAXLEN
+USERNAME = DEFAULT_USERNAME
+PASSWORD = DEFAULT_PASSWORD
 questions: List[str] = []
 corresponding_ids: List[str] = []
-
-# キャッシュの有効期限（秒）
-CACHE_EXPIRY = 3600
-# キャッシュ用の辞書
-cognito_cache: Dict[str, Any] = {}
-# グローバルロックの作成
-cache_lock = threading.Lock()
-
-def check_cache_expiry():
-    while True:
-        with cache_lock:  # この行を追加
-            current_time = datetime.now()
-            keys_to_delete = []
-            for cognito_user_id, cache_data in cognito_cache.items():
-                if current_time - cache_data['last_accessed'] > timedelta(seconds=CACHE_EXPIRY):
-                    keys_to_delete.append(cognito_user_id)
-            for key in keys_to_delete:
-                del cognito_cache[key]
-                logger.info(f"Cache for Cognito user ID {key} has been cleared.")
-        time.sleep(CACHE_EXPIRY)
 
 # スレッドを起動
 cache_thread = threading.Thread(target=check_cache_expiry)
 cache_thread.daemon = True  # メインプログラムが終了したらスレッドも終了
 cache_thread.start()
-
-def set_cognito_data(cognito_user_id):
-    try:
-        # settings_pathを更新
-        update_settings_path(cognito_user_id)
-        # 設定をロード
-        load_config(cognito_user_id)
-        # reference.jsonのpath更新
-        file_path, data, documents = get_file_path(cognito_user_id)
-        # vectors_pathの更新
-        vectors_path, vectors, index = load_vectors_and_create_index(cognito_user_id)
-    except Exception as e:
-        logger.error(f"Error in set_cognito_data: {e}")
-        return None
-
-    with cache_lock: 
-        cognito_cache[cognito_user_id] = {
-            'file_path': file_path,
-            'data': data,
-            'documents': documents,
-            'vectors_path': vectors_path,
-            'vectors': vectors,
-            'index': index,
-            'last_accessed': datetime.now()
-        }
-    return True  # 成功した場合はTrueを返す
 
 @app.route('/get_cognito_id', methods=['POST'])
 def get_cognito_id_route():
@@ -108,38 +65,6 @@ def get_cognito_id_route():
     except Exception as e:
         logger.error(f"Error in get_cognito_id_route: {e}")
         return "Internal Server Error", 500
-
-# グローバルロックの作成
-settings_lock = threading.Lock()
-user_settings: Dict[str, Any] = {}
-def load_config(cognito_user_id):
-    with settings_lock:
-        try:
-            settings_path = update_settings_path(cognito_user_id)
-            # print(f"Loading config from {settings_path}")  # デバッグ用
-            with open(settings_path, 'r') as f:
-                config = json.load(f)
-                # print(f"Loaded config: {config}")  # デバッグ用
-                user_settings[cognito_user_id] = {
-                    'api_key': config.get('api_key', openai.api_key),
-                    'max_requests': float(config.get('max_requests', max_requests)) if config.get('max_requests') != "Infinity" else float('inf'),
-                    'reset_time': int(config.get('reset_time', reset_time)),
-                    'threshold': float(config.get('threshold', threshold)),
-                    'model': config.get('model', model),
-                    'knowledge_about_user': config.get('knowledge_about_user', knowledge_about_user),
-                    'response_preference': config.get('response_preference', response_preference),
-                    'log_option': config.get('log_option', log_option),
-                    'history_maxlen': int(config.get('history_maxlen', history_maxlen)) if config.get('history_maxlen', history_maxlen) != float('inf') else float('inf'),
-                    'USERNAME': config.get('USERNAME', 'admin'),
-                    'PASSWORD': config.get('PASSWORD', 'password'),
-                    'questions': config.get('questions', '').split("\n") if config.get('questions', '') else [],
-                    'corresponding_ids': config.get('corresponding_ids', '').split("\n") if config.get('corresponding_ids', '') else []
-                }
-        except FileNotFoundError:
-            # print("File not found.")  # デバッグ用
-            pass  # ファイルが見つからない場合は特に何もしない
-        except Exception as e:
-            logger.error(f"Error in load_config: {e}")
 
 auth = HTTPBasicAuth()
 
