@@ -7,7 +7,6 @@ from collections import deque
 import numpy as np
 import json
 from datetime import datetime, timedelta
-import time
 from langdetect import detect
 import os
 from sklearn.metrics.pairwise import cosine_similarity
@@ -15,13 +14,12 @@ import threading
 from typing import List, Dict, Any, Deque, cast
 from src.utils.token_utils import count_tokens_with_tiktoken, trim_to_tokens
 from src.schema.logging_config import logger
-from src.utils.file_utils import update_settings_path, get_file_path
-from src.functions.vector_handling import load_vectors_and_create_index
+from src.utils.file_utils import update_settings_path
 from src.functions.stream_response import generate
 from src.functions.get_similar_faiss_id import get_similar_faiss_id
 from src.functions.embedding import embedding_user_message
 from src.functions.unstreamed_response import generate_chat_response, process_chat_response
-from src.utils.cache_utils import check_cache_expiry, cache_lock, cognito_cache, CACHE_EXPIRY
+from src.utils.cache_utils import check_cache_expiry, cognito_cache
 from src.utils.cognito_utils import set_cognito_data
 from src.schema.config_manager import load_config, settings_lock, user_settings, DEFAULT_MAX_REQUESTS, DEFAULT_RESET_TIME, DEFAULT_THRESHOLD, DEFAULT_MODEL, DEFAULT_KNOWLEDGE_ABOUT_USER, DEFAULT_RESPONSE_PREFERENCE, DEFAULT_LOG_OPTION, DEFAULT_HISTORY_MAXLEN, DEFAULT_USERNAME, DEFAULT_PASSWORD
 
