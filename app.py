@@ -12,16 +12,18 @@ import os
 from sklearn.metrics.pairwise import cosine_similarity
 import threading
 from typing import List, Dict, Any, Deque, cast
-from src.utils.token_utils import count_tokens_with_tiktoken, trim_to_tokens
 from src.schema.logging_config import logger
-from src.utils.file_utils import update_settings_path
+from src.schema.config_manager import load_config, settings_lock, user_settings, DEFAULT_MAX_REQUESTS, DEFAULT_RESET_TIME, DEFAULT_THRESHOLD, DEFAULT_MODEL, DEFAULT_KNOWLEDGE_ABOUT_USER, DEFAULT_RESPONSE_PREFERENCE, DEFAULT_LOG_OPTION, DEFAULT_HISTORY_MAXLEN, DEFAULT_USERNAME, DEFAULT_PASSWORD
 from src.functions.stream_response import generate
 from src.functions.get_similar_faiss_id import get_similar_faiss_id
 from src.functions.embedding import embedding_user_message
 from src.functions.unstreamed_response import generate_chat_response, process_chat_response
 from src.utils.cache_utils import check_cache_expiry, cognito_cache
 from src.utils.cognito_utils import set_cognito_data
-from src.schema.config_manager import load_config, settings_lock, user_settings, DEFAULT_MAX_REQUESTS, DEFAULT_RESET_TIME, DEFAULT_THRESHOLD, DEFAULT_MODEL, DEFAULT_KNOWLEDGE_ABOUT_USER, DEFAULT_RESPONSE_PREFERENCE, DEFAULT_LOG_OPTION, DEFAULT_HISTORY_MAXLEN, DEFAULT_USERNAME, DEFAULT_PASSWORD
+from src.utils.delete_cache import clear_user_cache
+from src.utils.set_user_cache import set_user_cache
+from src.utils.token_utils import count_tokens_with_tiktoken, trim_to_tokens
+from src.utils.file_utils import update_settings_path
 
 openai.api_key = ""
 
@@ -172,7 +174,6 @@ last_active: Dict[str, Any] = {}
 
 # ユーザーIDとリクエスト数を保存するパラメーター
 user_requests: Dict[str, Dict[str, Any]] = {}
-
 
 @app.route('/message', methods=['POST'])
 def message():
@@ -443,45 +444,11 @@ def message():
         new_message = process_chat_response(response, actual_titles, actual_urls, history, user_id, token_limit, local_log_option, user_message, cognito_user_id, matched_ids)
 
     else:        
-        # 必要な値をキャッシュに保存
-        cache.set('user_id', user_id)
-        cache.set(f"{user_id}_user_message", user_message)
-        cache.set(f"{user_id}_history", list(history[user_id]))
-        cache.set(f"{user_id}_token_limit", token_limit)
-        cache.set(f"{user_id}_local_log_option", local_log_option)
-
-        # actual_titlesとactual_urlsが存在する場合のみキャッシュにセット
-        if actual_titles:
-            cache.set(f"{user_id}_actual_titles", actual_titles)
-        if actual_urls:
-            cache.set(f"{user_id}_actual_urls", actual_urls)
-            
-        # closest_titlesが未定義の場合のみ初期化
-        try:
-            closest_titles
-        except NameError:
-            closest_titles = []
-
-        # closest_titlesが存在する場合のみキャッシュにセット
-        if closest_titles:
-            cache.set(f"{user_id}_closest_titles", closest_titles)
-            cache.set(f"{user_id}_combined_scores", combined_scores)
-            cache.set(f"{user_id}_closest_vector_indices", closest_vector_indices)
-
-        if matched_ids:
-            cache.set(f"{user_id}_matched_ids", matched_ids)
-            
-        if cognito_user_id:
-            cache.set(f"{user_id}_cognito_user_id", cognito_user_id)
-            
-        if local_model:
-            cache.set(f"{user_id}_local_model", local_model)
-            
-        if local_history_maxlen:
-            cache.set(f"{user_id}_local_history_maxlen", local_history_maxlen)
-        
-        if headers:
-            cache.set(f"{user_id}_headers", headers)
+        set_user_cache(
+            cache, user_id, user_message, history[user_id], token_limit, local_log_option,
+            actual_titles, actual_urls, closest_titles, combined_scores, closest_vector_indices,
+            matched_ids, cognito_user_id, local_model, local_history_maxlen, headers
+        )
 
         # フラグを含むJSONレスポンスを返す
         logger.info("Sending ready_for_stream flag to frontend.")
@@ -519,37 +486,8 @@ def stream_response():
     # matched_idsがキャッシュに存在する場合に取得
     matched_ids = list(cache.get(f"{user_id}_matched_ids") or [])
 
-    # 関数の最後でキャッシュを削除
-    if cache.get('user_id'):
-        cache.delete('user_id')
-    if cache.get(f"{user_id}_user_message"):
-        cache.delete(f"{user_id}_user_message")
-    if cache.get(f"{user_id}_history"):
-        cache.delete(f"{user_id}_history")
-    if cache.get(f"{user_id}_actual_titles"):
-        cache.delete(f"{user_id}_actual_titles")
-    if cache.get(f"{user_id}_actual_urls"):
-        cache.delete(f"{user_id}_actual_urls")
-    if cache.get(f"{user_id}_token_limit"):
-        cache.delete(f"{user_id}_token_limit")
-    if cache.get(f"{user_id}_local_log_option"):
-        cache.delete(f"{user_id}_local_log_option")
-    if cache.get(f"{user_id}_cognito_user_id"):
-        cache.delete(f"{user_id}_cognito_user_id")
-    if cache.get(f"{user_id}_local_model"):
-        cache.delete(f"{user_id}_local_model")
-    if cache.get(f"{user_id}_local_history_maxlen"):
-        cache.delete(f"{user_id}_local_history_maxlen")
-    if cache.get(f"{user_id}_headers"):
-        cache.delete(f"{user_id}_headers")
-
-    if cache.get(f"{user_id}_closest_titles"):  # closest_titlesがキャッシュに存在する場合のみ削除
-        cache.delete(f"{user_id}_closest_titles")
-        cache.delete(f"{user_id}_combined_scores")
-        cache.delete(f"{user_id}_closest_vector_indices")
-
-    if cache.get(f"{user_id}_matched_ids"):  # matched_idsがキャッシュに存在する場合のみ削除
-        cache.delete(f"{user_id}_matched_ids")
+    # キャッシュを削除
+    clear_user_cache(cache, user_id)
 
     try:
         response = Response(stream_with_context(generate(
