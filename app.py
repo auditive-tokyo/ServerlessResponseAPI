@@ -417,6 +417,7 @@ def message():
         new_message = process_chat_response(response, actual_titles, actual_urls, history, user_id, token_limit, local_log_option, user_message, cognito_user_id, matched_ids)
 
     else:        
+        logger.info("Entering streaming mode")
         set_user_cache(
             cache, user_id, user_message, history[user_id], token_limit, local_log_option,
             actual_titles, actual_urls, closest_titles, combined_scores, closest_vector_indices,
@@ -460,7 +461,7 @@ def stream_response():
     matched_ids = list(cache.get(f"{user_id}_matched_ids") or [])
 
     # キャッシュを削除
-    clear_user_cache(cache, user_id)
+    # clear_user_cache(cache, user_id)
 
     try:
         response = Response(stream_with_context(generate(
