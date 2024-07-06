@@ -9,10 +9,8 @@ def set_cognito_data(cognito_user_id):
     try:
         # 設定をロード
         settings = load_settings(cognito_user_id)
-        
         # reference.jsonのpath取得
         file_path, data, documents = get_file_path(cognito_user_id)
-        
         # vectors_pathの取得とインデックスの作成
         vectors_path, vectors, index = load_vectors_and_create_index(cognito_user_id)
         

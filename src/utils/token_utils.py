@@ -13,3 +13,9 @@ def trim_to_tokens(text, max_tokens):
     else:
         trimmed_tokens = tokens[:max_tokens]
         return enc.decode(trimmed_tokens)
+    
+def get_token_limit(model: str) -> int:
+    if model in ['gpt-4o', 'gpt-4-turbo-preview']:
+        return 128000
+    else:
+        return 16000

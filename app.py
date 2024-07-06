@@ -11,7 +11,7 @@ from langdetect import detect
 import os
 from sklearn.metrics.pairwise import cosine_similarity
 import threading
-from typing import List, Dict, Any, Deque, cast
+from typing import Dict, Any, Deque
 from src.schema.logging_config import logger
 from src.schema.config_manager import load_settings, settings_lock, user_settings
 from src.functions.stream_response import generate
@@ -20,9 +20,8 @@ from src.functions.embedding import embedding_user_message
 from src.functions.unstreamed_response import generate_chat_response, process_chat_response
 from src.utils.cache_utils import check_cache_expiry, cognito_cache
 from src.utils.cognito_utils import set_cognito_data
-from src.utils.delete_cache import clear_user_cache
-from src.utils.set_user_cache import set_user_cache
-from src.utils.token_utils import count_tokens_with_tiktoken, trim_to_tokens
+from src.utils.user_cache import set_user_cache, get_user_cache
+from src.utils.token_utils import count_tokens_with_tiktoken, trim_to_tokens, get_token_limit
 from src.utils.file_utils import update_settings_path
 
 openai.api_key = ""
@@ -153,6 +152,14 @@ def message():
     session_id = data.get("session_id")
     cognito_user_id = data.get("member_id")
     stream = data.get("stream", False)
+
+    # ここら辺の変数は初期化しないとエラーが出る時がある
+    actual_titles = []
+    actual_urls = []
+    closest_titles = []
+    combined_scores = []
+    closest_vector_indices = []
+    matched_ids = []
     
     # キャッシュから値を取得
     cached_data = cognito_cache.get(cognito_user_id, {})
@@ -224,10 +231,6 @@ def message():
     user_requests[user_id]['count'] += 1
     user_requests[user_id]['last_request'] = datetime.now()
     
-    # actual_titlesとactual_urlsを空のリストとして初期化
-    actual_titles = []
-    actual_urls = []
-    
     # ユーザーメッセージの言語を検出
     language = detect(user_message)
     
@@ -239,9 +242,6 @@ def message():
         
     # questionsとcorresponding_idsを組み合わせてプロンプトを作成
     combined_list = "\n".join([f"{q} - ID: {id_}" for q, id_ in zip(local_questions, local_corresponding_ids)])
-    
-    # matched_idsを空のリストとして初期化
-    matched_ids = []
         
     # combined_listが空でない場合のみget_similar_faiss_id関数を呼び出す
     if combined_list:
@@ -356,15 +356,7 @@ def message():
     logger.info(f"Total tokens: {total_tokens}")
     
     # モデルに基づいてトークン制限を設定
-    if local_model == 'gpt-4':
-        token_limit = 8000
-    elif local_model == 'gpt-3.5-turbo-16k' or local_model == 'gpt-3.5-turbo-1106':
-        token_limit = 16000
-    elif local_model == 'gpt-4-1106-preview':
-        token_limit = 128000
-    else:
-        token_limit = 4000
-
+    token_limit = get_token_limit(local_model)
     logger.info(f"選択されたモデルとそのトークン制限: {local_model, token_limit}")
 
     # Define trimmed_content before the loop
@@ -437,50 +429,13 @@ def message():
 @app.route('/stream_response', methods=['GET'])
 def stream_response():
     user_id = str(cache.get('user_id') or "")
-    user_message = cache.get(f"{user_id}_user_message")
-    local_history_maxlen = int(cache.get(f"{user_id}_local_history_maxlen") or 0)
-    user_history: Deque[Dict[str, str]] = deque(cast(List[Dict[str, str]], cache.get(f"{user_id}_history") or []), maxlen=local_history_maxlen)
-    token_limit = cache.get(f"{user_id}_token_limit")
-    local_log_option = cache.get(f"{user_id}_local_log_option")
-    cognito_user_id = cache.get(f"{user_id}_cognito_user_id")
-    local_model = cache.get(f"{user_id}_local_model")
-    headers = cache.get(f"{user_id}_headers")
-
-    # actual_titlesとactual_urlsがキャッシュに存在する場合に取得
-    actual_titles = list(cache.get(f"{user_id}_actual_titles") or [])
-    actual_urls = list(cache.get(f"{user_id}_actual_urls") or [])
-
-    # closest_titles関連の値がキャッシュに存在する場合に取得
-    closest_titles = list(cache.get(f"{user_id}_closest_titles") or [])
-    combined_scores = list(cache.get(f"{user_id}_combined_scores") or [])
-    closest_vector_indices = cache.get(f"{user_id}_closest_vector_indices")
-    if closest_vector_indices is None or len(closest_vector_indices) == 0:
-        closest_vector_indices = ""
-
-    # matched_idsがキャッシュに存在する場合に取得
-    matched_ids = list(cache.get(f"{user_id}_matched_ids") or [])
+    cache_data = get_user_cache(cache, user_id)
 
     # キャッシュを削除
     # clear_user_cache(cache, user_id)
 
     try:
-        response = Response(stream_with_context(generate(
-            user_id=user_id,
-            user_message=user_message,
-            user_history=user_history,
-            token_limit=token_limit,
-            local_log_option=local_log_option,
-            cognito_user_id=cognito_user_id,
-            local_model=local_model,
-            headers=headers,
-            actual_titles=actual_titles,
-            actual_urls=actual_urls,
-            closest_titles=closest_titles,
-            combined_scores=combined_scores,
-            closest_vector_indices=closest_vector_indices,
-            matched_ids=matched_ids,
-            history=history
-        )), content_type='text/event-stream')
+        response = Response(stream_with_context(generate(**cache_data, history=history)), content_type='text/event-stream')
         response.headers['Cache-Control'] = 'no-cache'
         response.headers['Pragma'] = 'no-cache'
         response.headers['Expires'] = '0'
