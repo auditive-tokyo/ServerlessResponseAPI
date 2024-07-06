@@ -1,48 +1,56 @@
 import threading
-import json
-import openai
 from typing import Dict, Any
-from src.schema.logging_config import logger
 from src.utils.file_utils import update_settings_path
+import json
+from src.schema.logging_config import logger
 
 # グローバルロックの作成
 settings_lock = threading.Lock()
 user_settings: Dict[str, Any] = {}
 
-# 初期値の定義
-DEFAULT_MAX_REQUESTS = float('inf')
-DEFAULT_RESET_TIME = 3600
-DEFAULT_THRESHOLD = 0.7
-DEFAULT_MODEL = 'gpt-3.5-turbo-0125'
-DEFAULT_KNOWLEDGE_ABOUT_USER = ""
-DEFAULT_RESPONSE_PREFERENCE = ""
-DEFAULT_LOG_OPTION = 'off'
-DEFAULT_HISTORY_MAXLEN = 12
-DEFAULT_USERNAME = 'admin'
-DEFAULT_PASSWORD = 'password'
+# デフォルト設定の定義
+DEFAULT_SETTINGS = {
+    'max_requests': float('inf'),
+    'reset_time': 3600,
+    'threshold': 0.7,
+    'model': 'gpt-3.5-turbo-0125',
+    'knowledge_about_user': "",
+    'response_preference': "",
+    'log_option': 'off',
+    'history_maxlen': 12,
+    'USERNAME': None,  # 初期値をNoneに設定
+    'PASSWORD': None,  # 初期値をNoneに設定
+    'questions': [],
+    'corresponding_ids': []
+}
 
-def load_config(cognito_user_id):
+from typing import Dict, Any
+
+def load_settings(cognito_user_id: str) -> Dict[str, Any]:
+    settings_path = update_settings_path(cognito_user_id)
+    try:
+        with open(settings_path, 'r', encoding='utf-8') as f:
+            settings = json.load(f)
+        
+        # デフォルト値で辞書を初期化し、読み込んだ設定で上書き
+        result = DEFAULT_SETTINGS.copy()
+        result.update(settings)
+        
+        # 特別な処理が必要な項目の処理
+        if result['max_requests'] == "Infinity":
+            result['max_requests'] = float('inf')
+        
+        # 文字列をリストに変換
+        result['questions'] = result['questions'].split("\n") if result['questions'] else []
+        result['corresponding_ids'] = result['corresponding_ids'].split("\n") if result['corresponding_ids'] else []
+        
+        return result
+    except FileNotFoundError:
+        return DEFAULT_SETTINGS.copy()
+    except json.JSONDecodeError:
+        logger.error(f"Invalid JSON in settings file for user {cognito_user_id}")
+        return DEFAULT_SETTINGS.copy()
+
+def get_user_setting(cognito_user_id, key):
     with settings_lock:
-        try:
-            settings_path = update_settings_path(cognito_user_id)
-            with open(settings_path, 'r') as f:
-                config = json.load(f)
-                user_settings[cognito_user_id] = {
-                    'api_key': config.get('api_key', openai.api_key),
-                    'max_requests': float(config.get('max_requests', DEFAULT_MAX_REQUESTS)) if config.get('max_requests') != "Infinity" else float('inf'),
-                    'reset_time': int(config.get('reset_time', DEFAULT_RESET_TIME)),
-                    'threshold': float(config.get('threshold', DEFAULT_THRESHOLD)),
-                    'model': config.get('model', DEFAULT_MODEL),
-                    'knowledge_about_user': config.get('knowledge_about_user', DEFAULT_KNOWLEDGE_ABOUT_USER),
-                    'response_preference': config.get('response_preference', DEFAULT_RESPONSE_PREFERENCE),
-                    'log_option': config.get('log_option', DEFAULT_LOG_OPTION),
-                    'history_maxlen': int(config.get('history_maxlen', DEFAULT_HISTORY_MAXLEN)) if config.get('history_maxlen', DEFAULT_HISTORY_MAXLEN) != float('inf') else float('inf'),
-                    'USERNAME': config.get('USERNAME', DEFAULT_USERNAME),
-                    'PASSWORD': config.get('PASSWORD', DEFAULT_PASSWORD),
-                    'questions': config.get('questions', '').split("\n") if config.get('questions', '') else [],
-                    'corresponding_ids': config.get('corresponding_ids', '').split("\n") if config.get('corresponding_ids', '') else []
-                }
-        except FileNotFoundError:
-            pass  # ファイルが見つからない場合は特に何もしない
-        except Exception as e:
-            logger.error(f"Error in load_config: {e}")
+        return user_settings.get(cognito_user_id, {}).get(key, DEFAULT_SETTINGS.get(key))

@@ -13,7 +13,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 import threading
 from typing import List, Dict, Any, Deque, cast
 from src.schema.logging_config import logger
-from src.schema.config_manager import load_config, settings_lock, user_settings, DEFAULT_MAX_REQUESTS, DEFAULT_RESET_TIME, DEFAULT_THRESHOLD, DEFAULT_MODEL, DEFAULT_KNOWLEDGE_ABOUT_USER, DEFAULT_RESPONSE_PREFERENCE, DEFAULT_LOG_OPTION, DEFAULT_HISTORY_MAXLEN, DEFAULT_USERNAME, DEFAULT_PASSWORD
+from src.schema.config_manager import load_settings, settings_lock, user_settings
 from src.functions.stream_response import generate
 from src.functions.get_similar_faiss_id import get_similar_faiss_id
 from src.functions.embedding import embedding_user_message
@@ -33,20 +33,6 @@ CORS(app)
 
 # スレッドローカル変数の定義
 local_data = threading.local()
-
-# Global variables
-max_requests = DEFAULT_MAX_REQUESTS
-reset_time = DEFAULT_RESET_TIME
-threshold = DEFAULT_THRESHOLD
-model = DEFAULT_MODEL
-knowledge_about_user = DEFAULT_KNOWLEDGE_ABOUT_USER
-response_preference = DEFAULT_RESPONSE_PREFERENCE
-log_option = DEFAULT_LOG_OPTION
-history_maxlen = DEFAULT_HISTORY_MAXLEN
-USERNAME = DEFAULT_USERNAME
-PASSWORD = DEFAULT_PASSWORD
-questions: List[str] = []
-corresponding_ids: List[str] = []
 
 # スレッドを起動
 cache_thread = threading.Thread(target=check_cache_expiry)
@@ -71,40 +57,26 @@ auth = HTTPBasicAuth()
 @auth.verify_password
 def verify_password(username, password):
     cognito_user_id = username
-    load_config(cognito_user_id)
-    with settings_lock:  # ロックをかける
-        user_specific_settings = user_settings.get(cognito_user_id, {})
-        
-    USERNAME = user_specific_settings.get('USERNAME', 'admin')
-    PASSWORD = user_specific_settings.get('PASSWORD', 'password')
-    # print(f"Verifying for {cognito_user_id} - USERNAME: {USERNAME}, PASSWORD: {PASSWORD}")  # デバッグ用
-    return username == USERNAME and password == PASSWORD
+    settings = load_settings(cognito_user_id)
+    
+    USERNAME = settings['USERNAME']
+    PASSWORD = settings['PASSWORD']
+    
+    if USERNAME is None or PASSWORD is None:
+        # 新規ユーザーの場合、パスワード設定プロセスを開始
+        return start_password_setup(cognito_user_id, password)
+    
+    return cognito_user_id == USERNAME and password == PASSWORD
+
+def start_password_setup(cognito_user_id, password):
+    # パスワード設定プロセスを実装
+    # 例: 一時的なトークンを生成し、パスワード設定ページにリダイレクト
+    pass
 
 @app.route('/config/<string:cognito_user_id>', methods=['GET'])
 @auth.login_required
 def config(cognito_user_id):
-    load_config(cognito_user_id)
-    with settings_lock:  # ロックをかける
-        # まずはデフォルトの設定をロード
-        settings = {
-            'api_key': openai.api_key,
-            'max_requests': max_requests,
-            'reset_time': reset_time,
-            'threshold': threshold,
-            'model': model,
-            'knowledge_about_user': knowledge_about_user,
-            'response_preference': response_preference,        
-            'log_option': log_option,
-            'history_maxlen': history_maxlen,
-            'USERNAME': USERNAME,
-            'PASSWORD': PASSWORD,
-            'questions': "\n".join(questions) if questions else '',
-            'corresponding_ids': "\n".join(corresponding_ids) if corresponding_ids else ''
-        }
-    
-    # user_settingsから該当するcognito_user_idの設定を取得して上書き
-    user_specific_settings = user_settings.get(cognito_user_id, {})
-    settings.update(user_specific_settings)
+    settings = load_settings(cognito_user_id)
     
     # MAX_REQUESTSの小数点を省く
     if isinstance(settings['max_requests'], (int, float)) and settings['max_requests'] != float('inf'):
@@ -113,9 +85,7 @@ def config(cognito_user_id):
         settings['max_requests'] = 'inf'
     
     # Zip the questions and corresponding_ids
-    questions_for_user = user_specific_settings.get('questions', questions)
-    corresponding_ids_for_user = user_specific_settings.get('corresponding_ids', corresponding_ids)
-    zipped_questions_ids = list(zip(questions_for_user, corresponding_ids_for_user))
+    zipped_questions_ids = list(zip(settings['questions'], settings['corresponding_ids']))
 
     # Pass the zipped list to the template
     return render_template('config.html', cognito_user_id=cognito_user_id, zipped_questions_ids=zipped_questions_ids, **settings)
@@ -184,33 +154,36 @@ def message():
     cognito_user_id = data.get("member_id")
     stream = data.get("stream", False)
     
-    # Lineなど、streamができないものに関してはここで各種pathやconfigを取得する
-    if not stream:
-        set_cognito_data(cognito_user_id)
-        
     # キャッシュから値を取得
     cached_data = cognito_cache.get(cognito_user_id, {})
+    
+    if not cached_data:
+        # キャッシュにデータがない場合、set_cognito_dataを呼び出す
+        if not set_cognito_data(cognito_user_id):
+            return jsonify({"error": "Failed to set cognito data"}), 500
+        cached_data = cognito_cache.get(cognito_user_id, {})
+    
+    settings = cached_data.get('settings', {})
     file_path = cached_data.get('file_path')
     data = cached_data.get('data')
     documents = cached_data.get('documents')
     vectors_path = cached_data.get('vectors_path')
     vectors = cached_data.get('vectors')
     index = cached_data.get('index')
-
-    # cognito_user_idに基づいて設定を取得
-    settings = user_settings.get(cognito_user_id, {})
-    local_api_key = settings.get('api_key', openai.api_key)
-    headers={"Authorization": f"Bearer {local_api_key}"}
-    local_max_requests = settings.get('max_requests', max_requests)
-    local_reset_time = settings.get('reset_time', reset_time)
-    local_threshold = settings.get('threshold', threshold)
-    local_model = settings.get('model', model)
-    local_knowledge_about_user = settings.get('knowledge_about_user', knowledge_about_user)
-    local_response_preference = settings.get('response_preference', response_preference)
-    local_log_option = settings.get('log_option', log_option)
-    local_history_maxlen = settings.get('history_maxlen', history_maxlen)
-    local_questions = settings.get('questions', questions)
-    local_corresponding_ids = settings.get('corresponding_ids', corresponding_ids)
+    
+    # 設定値を取得
+    local_api_key = settings.get('api_key')
+    headers = {"Authorization": f"Bearer {local_api_key}"}
+    local_max_requests = settings.get('max_requests')
+    local_reset_time = settings.get('reset_time')
+    local_threshold = settings.get('threshold')
+    local_model = settings.get('model')
+    local_knowledge_about_user = settings.get('knowledge_about_user')
+    local_response_preference = settings.get('response_preference')
+    local_log_option = settings.get('log_option')
+    local_history_maxlen = settings.get('history_maxlen')
+    local_questions = settings.get('questions')
+    local_corresponding_ids = settings.get('corresponding_ids')
     
     logger.info(f"Cognito User ID Check: {cognito_user_id}")
     logger.info(f"reference.json path: {file_path}")
