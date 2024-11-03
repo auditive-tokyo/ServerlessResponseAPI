@@ -4,7 +4,7 @@
 ***This package consists of three programs.***
 
 1. **EMBED-IT**: Extracts and embeds text from URLs or sitemaps. Text from PDFs and CSVs can also be used. This process generates "vectors.npy," which stores the vector representations of the text, and "reference.json," which stores the corresponding reference text.
-   - [View Code](hhttps://github.com/tokyoundergroundbeatzmassive/EMBED_IT)
+   - [View Code](https://github.com/tokyoundergroundbeatzmassive/EMBED_IT)
    - Clone: `git clone https://github.com/tokyoundergroundbeatzmassive/EMBED_IT.git`
 
 2. **DeepFaissChat**: Backend for generating Chat Bot responses.
