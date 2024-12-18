@@ -1,9 +1,9 @@
 from datetime import datetime
-from src.schema.logging_config import logger
+from src.utils.logging_config import logger
 from src.utils.cache_utils import cache_lock, cognito_cache
 from src.functions.vector_handling import load_vectors_and_create_index
 from src.utils.file_utils import get_file_path
-from src.schema.config_manager import load_settings
+from src.utils.config_manager import load_settings
 
 def set_cognito_data(cognito_user_id):
     try:

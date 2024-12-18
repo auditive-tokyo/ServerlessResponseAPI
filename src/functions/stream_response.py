@@ -3,7 +3,7 @@ import openai
 import validators
 from src.functions.logdata import log_data
 from src.utils.token_utils import count_tokens_with_tiktoken
-from src.schema.logging_config import logger
+from src.utils.logging_config import logger
 from openai.error import ServiceUnavailableError
 
 def generate(user_id, user_message, user_history, token_limit, local_log_option, cognito_user_id, local_model, headers, actual_titles, actual_urls, closest_titles, combined_scores, closest_vector_indices, matched_ids, history):

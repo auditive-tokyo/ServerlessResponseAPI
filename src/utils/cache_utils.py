@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 import threading
 import time
 from typing import Dict, Any
-from src.schema.logging_config import logger
+from src.utils.logging_config import logger
 
 # キャッシュの有効期限（秒）
 CACHE_EXPIRY = 3600

@@ -1,6 +1,6 @@
 import os
 import csv
-from src.schema.logging_config import logger
+from src.utils.logging_config import logger
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 

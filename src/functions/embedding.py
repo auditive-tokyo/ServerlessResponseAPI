@@ -1,5 +1,5 @@
 import openai
-from src.schema.logging_config import logger
+from src.utils.logging_config import logger
 
 def embedding_user_message(user_message: str, headers: dict):
     try:

@@ -2,7 +2,7 @@ import threading
 from typing import Dict, Any
 from src.utils.file_utils import update_settings_path
 import json
-from src.schema.logging_config import logger
+from src.utils.logging_config import logger
 
 # グローバルロックの作成
 settings_lock = threading.Lock()

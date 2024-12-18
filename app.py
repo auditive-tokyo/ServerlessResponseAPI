@@ -12,8 +12,8 @@ import os
 from sklearn.metrics.pairwise import cosine_similarity
 import threading
 from typing import Dict, Any, Deque
-from src.schema.logging_config import logger
-from src.schema.config_manager import load_settings, settings_lock, user_settings
+from src.utils.logging_config import logger
+from src.utils.config_manager import load_settings, settings_lock, user_settings
 from src.functions.stream_response import generate
 from src.functions.get_similar_faiss_id import get_similar_faiss_id
 from src.functions.embedding import embedding_user_message

@@ -1,6 +1,6 @@
 import re
 import openai
-from src.schema.logging_config import logger
+from src.utils.logging_config import logger
 
 def get_similar_faiss_id(headers, local_model, local_knowledge_about_user, user_message, user_id, history, prefix, combined_list):
     # 既存の履歴から必要なメッセージを抽出

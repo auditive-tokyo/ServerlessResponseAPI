@@ -1,7 +1,7 @@
 import openai
 from openai.error import ServiceUnavailableError
 from flask import jsonify
-from src.schema.logging_config import logger
+from src.utils.logging_config import logger
 import validators
 from src.utils.token_utils import count_tokens_with_tiktoken
 from src.functions.logdata import log_data
