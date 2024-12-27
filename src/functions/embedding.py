@@ -1,15 +1,25 @@
-import openai
-from src.utils.logging_config import logger
+from openai import AsyncOpenAI
+import numpy as np
+from typing import Dict, Any, Optional
 
-def embedding_user_message(user_message: str, headers: dict):
+async def embedding_user_message(message: str, headers: Dict[str, Any]) -> Optional[np.ndarray]:
     try:
-        embedding_result = openai.Embedding.create(
+        # AsyncOpenAIクライアントの初期化
+        client = AsyncOpenAI(api_key=headers["Authorization"].split(" ")[1])
+        
+        # 埋め込みの生成
+        response = await client.embeddings.create(
             model="text-embedding-ada-002",
-            input=user_message,
-            headers=headers
+            input=message
         )
-        user_message_vector = embedding_result['data'][0]['embedding']
-        return user_message_vector
+        
+        if response and hasattr(response, 'data') and response.data:
+            embedding = response.data[0].embedding
+            return np.array(embedding, dtype=np.float32)
+        
+        print("No embedding data in response")
+        return None
+        
     except Exception as e:
-        logger.error(f"Error while embedding user message: {e}")
+        print(f"Error in embedding: {e}")
         return None

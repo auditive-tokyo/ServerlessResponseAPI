@@ -1,12 +1,16 @@
 import logging
-from logging.handlers import RotatingFileHandler
+import sys
 
-# ロガーの設定
-logger = logging.getLogger('app_logger')
-logger.setLevel(logging.INFO)
+# loggerの設定
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
-# ハンドラの設定
-handler = RotatingFileHandler('app.log', maxBytes=5*1024*1024, backupCount=10)
-formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+# StreamHandlerを使用してコンソールに出力
+handler = logging.StreamHandler(sys.stdout)
+handler.setLevel(logging.DEBUG)
+
+# フォーマットの設定
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 handler.setFormatter(formatter)
+
 logger.addHandler(handler)

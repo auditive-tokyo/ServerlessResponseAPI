@@ -1,22 +1,22 @@
-import os
 import numpy as np
 import faiss
 from faiss import IndexFlatL2
-from typing import Optional, Any, Tuple
-from src.utils.file_utils import generate_folder_name
-
-ROOT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from typing import Optional, Tuple
+from src.utils.dir_config import VECTORS_PATH
+from src.utils.logging_config import logger
 
 dimension = 1536
 index: Optional[IndexFlatL2] = None
 vectors: Optional[np.ndarray] = None
 
-def load_vectors_and_create_index(cognito_user_id: Any) -> Tuple[str, Any, IndexFlatL2]:
-    folder_name = generate_folder_name(cognito_user_id)
-    vectors_path = os.path.join(ROOT_DIR, folder_name, 'vectors.npy')
-    vectors = np.load(vectors_path)
-    
-    index = faiss.IndexFlatL2(dimension)
-    index.add(vectors)
-    
-    return vectors_path, vectors, index
+async def load_vectors_and_create_index() -> Tuple[Optional[np.ndarray], Optional[IndexFlatL2]]:
+    try:
+        vectors = np.load(VECTORS_PATH)
+        
+        index = faiss.IndexFlatL2(dimension)
+        index.add(vectors)
+        
+        return vectors, index
+    except Exception as e:
+        logger.error(f"Error loading vectors: {e}")
+        return None, None
