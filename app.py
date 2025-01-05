@@ -1,6 +1,5 @@
 import json
 import os
-# from dotenv import load_dotenv
 import aioboto3
 import asyncio
 
@@ -12,8 +11,6 @@ from src.functions.similarity import similarity
 from src.functions.get_reference_texts import get_reference_texts
 from src.functions.dynamo_functions import get_chat_history, save_chat_history
 from src.functions.stream_response import generate_stream_response
-
-# load_dotenv()
 
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 MODEL = "gpt-4o-mini"
