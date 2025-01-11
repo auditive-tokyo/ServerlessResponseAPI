@@ -6,7 +6,6 @@ import asyncio
 from src.utils.logging_config import logger
 from src.functions.embedding import embedding_user_message
 from src.functions.vector_handling import load_vectors_and_create_index
-# from src.functions.get_similar_faiss_id import get_similar_faiss_id
 from src.functions.similarity import similarity
 from src.functions.get_reference_texts import get_reference_texts
 from src.functions.dynamo_functions import get_chat_history, save_chat_history
@@ -58,15 +57,16 @@ async def _async_handler(event, context):
                 'body': json.dumps({'error': 'You need to enable local storage or cookie'})
             }
 
-        # 以下、元のコードの処理を続ける
-        history = await get_chat_history(browser_id)
         headers = {
             "Authorization": f"Bearer {OPENAI_API_KEY}",
             "Content-Type": "application/json"
         }
-        
-        embedded_message = await embedding_user_message(user_message, headers)
-        vectors, index = await load_vectors_and_create_index()
+
+        history, embedded_message, (vectors, index) = await asyncio.gather(
+            get_chat_history(browser_id),
+            embedding_user_message(user_message, headers),
+            load_vectors_and_create_index()
+        )
         
         if vectors is None or index is None:
             return {

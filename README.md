@@ -1,7 +1,5 @@
 # Chatbot with Serverless Architecture
 
-**Currently Under Development**
-
 A serverless-architected chatbot that utilizes embeddings and FAISS for similarity search indexing, featuring real-time streaming responses via Server-Sent Events (SSE).
 
 ## Features
@@ -16,3 +14,7 @@ A serverless-architected chatbot that utilizes embeddings and FAISS for similari
 1. Install dependencies
 2. Create env.json for local testing
 3. Build and run locally
+
+## Deploy
+You can deploy it to Lambda directory. OPENAI_API_KEY is needed in env. 
+Currently working on CI/CD pipeline, using SAM.
