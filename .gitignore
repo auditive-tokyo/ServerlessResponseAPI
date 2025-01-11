@@ -9,3 +9,9 @@ app.log
 .env
 .aws-sam
 env.json
+
+# For development
+python/
+package/
+layer.zip
+testChat.zip

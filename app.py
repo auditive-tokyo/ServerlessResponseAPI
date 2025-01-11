@@ -19,7 +19,19 @@ SIMILARITY_THRESHOLD = 0.67
 session = aioboto3.Session()
 TABLE_NAME = "test_chat_history"
 
-async def lambda_handler(event, context):
+def lambda_handler(event, context):
+    try:
+        loop = asyncio.get_event_loop()
+        return loop.run_until_complete(_async_handler(event, context))
+    except Exception as e:
+        logger.error(f"Error in lambda_handler: {e}")
+        return {
+            'statusCode': 500,
+            'headers': {'Content-Type': 'application/json'},
+            'body': json.dumps({'error': str(e)})
+        }
+
+async def _async_handler(event, context):
     try:        
         if not event.get('body'):
             return {
@@ -46,22 +58,16 @@ async def lambda_handler(event, context):
                 'body': json.dumps({'error': 'You need to enable local storage or cookie'})
             }
 
-        # 履歴の取得
+        # 以下、元のコードの処理を続ける
         history = await get_chat_history(browser_id)
-        logger.debug(f"history exists: {len(history)}")
-
-        # OpenAI APIのヘッダーを設定
         headers = {
             "Authorization": f"Bearer {OPENAI_API_KEY}",
             "Content-Type": "application/json"
         }
-        # メッセージのembedding
-        embedded_message = await embedding_user_message(user_message, headers)
-        # print(f"embeded_message: {embedded_message[:16]}")
         
-        # ベクトルとインデックスの読み込み
+        embedded_message = await embedding_user_message(user_message, headers)
         vectors, index = await load_vectors_and_create_index()
-        # print(f"vector, index: {vectors}\n{index}")
+        
         if vectors is None or index is None:
             return {
                 'statusCode': 500,
@@ -69,22 +75,15 @@ async def lambda_handler(event, context):
                 'body': json.dumps({'error': 'Failed to load vectors'})
             }
 
-        # 類似度の計算
         similar_indices = await similarity(embedded_message, index, SIMILARITY_THRESHOLD)
-        logger.debug(f"Similar Indices: {similar_indices}")
-
-        # 類似テキストの取得
         reference_texts = await get_reference_texts(similar_indices)
-        logger.debug(f"Number of reference texts found: {len(reference_texts)}")
         
-        # 新しい参照テキストを追加
         for ref in reference_texts:
             history.append({
                 "role": "system",
                 "content": f"Reference: {ref['title']}\n{ref['text']}"
             })
 
-        # チャットレスポンスの生成（参照テキストも渡す）
         response_generator = generate_stream_response(
             user_message=user_message,
             history=history,
@@ -95,7 +94,6 @@ async def lambda_handler(event, context):
             save_history=save_chat_history
         )
 
-        # ジェネレーターを反復処理して応答を生成
         responses = []
         async for chunk in response_generator:
             responses.append(chunk)
@@ -104,9 +102,14 @@ async def lambda_handler(event, context):
             'statusCode': 200,
             'headers': {
                 'Content-Type': 'text/event-stream',
-                'Connection': 'keep-alive'
+                'Cache-Control': 'no-cache',
+                'Connection': 'keep-alive',
+                'Transfer-Encoding': 'chunked'
             },
-            'body': ''.join(responses)
+            'body': json.dumps({
+                'isBase64Encoded': False,
+                'chunks': responses
+            })
         }
 
     except Exception as e:
@@ -115,9 +118,4 @@ async def lambda_handler(event, context):
             'statusCode': 500,
             'headers': {'Content-Type': 'application/json'},
             'body': json.dumps({'error': str(e)})
-        }
-
-
-# Lambda用のエントリーポイントラッパー
-def handler(event, context):
-    return asyncio.get_event_loop().run_until_complete(lambda_handler(event, context))
+        } 

@@ -27,12 +27,15 @@ Resources:
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref ChatHistoryTable
+      FunctionUrlConfig:
+        InvokeMode: RESPONSE_STREAM
       Events:
         ChatAPI:
-          Type: Api
+          Type: HttpApi
           Properties:
             Path: /chat
             Method: post
+            PayloadFormatVersion: '2.0'
             # RestApiId: !Ref ApiId # ローカルテスト時はコメントアウト
 
   ChatHistoryTable:
