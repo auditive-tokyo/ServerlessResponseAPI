@@ -9,7 +9,7 @@ async def embedding_user_message(message: str, headers: Dict[str, Any]) -> Optio
         
         # 埋め込みの生成
         response = await client.embeddings.create(
-            model="text-embedding-ada-002",
+            model="text-embedding-3-large",
             input=message
         )
         

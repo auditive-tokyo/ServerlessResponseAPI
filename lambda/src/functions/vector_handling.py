@@ -5,7 +5,7 @@ from typing import Optional, Tuple
 from src.utils.dir_config import VECTORS_PATH
 from src.utils.logging_config import logger
 
-dimension = 1536
+dimension = 3072
 index: Optional[IndexFlatL2] = None
 vectors: Optional[np.ndarray] = None
 
