@@ -49,6 +49,9 @@ Resources:
         - AttributeName: browser_id
           KeyType: HASH
       BillingMode: PAY_PER_REQUEST
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
 
 Outputs:
   LambdaUrl:
