@@ -3,7 +3,7 @@
 A serverless-architected chatbot that utilizes embeddings and FAISS for similarity search indexing, featuring real-time streaming responses via Server-Sent Events (SSE).
 
 ## Features
-- Serverless architecture using AWS Lambda and API Gateway
+- Serverless architecture using AWS Lambda
 - Real-time streaming responses using Server-Sent Events (SSE)
 - Similarity search using FAISS indexing
 - Streaming responses from OpenAI's API
@@ -11,10 +11,8 @@ A serverless-architected chatbot that utilizes embeddings and FAISS for similari
 - Local development environment with SAM CLI
 
 ## Local Development
-1. Install dependencies
-2. Create env.json for local testing
-3. Build and run locally
+1. `sam build`
+2. `sam local invoke ChatFunction --event events/event.json` for testing
 
 ## Deploy
-You can deploy it to Lambda directory. OPENAI_API_KEY is needed in env. 
-Currently working on CI/CD pipeline, using SAM.
+`sam deploy --guided` for 1st time

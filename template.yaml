@@ -2,24 +2,25 @@ AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 
 Parameters:
-  ApiId:
-    Type: String
-    Description: "Existing HTTP API Gateway ID"
-  ApiRegion:
-    Type: String
-    Description: "API Gateway Region"
   OpenAIApiKey:
     Type: String
     NoEcho: true
 
 Resources:
+  LayerForServerlessEmbedAi:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      ContentUri: ./layer/
+      CompatibleRuntimes:
+        - python3.13
+
   ChatFunction:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: ./
-      Handler: app.handler
+      CodeUri: ./lambda
+      Handler: app.lambda_handler
       Runtime: python3.13
-      Timeout: 120
+      Timeout: 15
       MemorySize: 512
       Environment:
         Variables:
@@ -27,21 +28,20 @@ Resources:
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref ChatHistoryTable
-      FunctionUrlConfig:
-        InvokeMode: RESPONSE_STREAM
-      Events:
-        ChatAPI:
-          Type: HttpApi
-          Properties:
-            Path: /chat
-            Method: post
-            PayloadFormatVersion: '2.0'
-            # RestApiId: !Ref ApiId # ローカルテスト時はコメントアウト
+      Layers:
+        - !Ref LayerForServerlessEmbedAi
+
+  ChatFunctionUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      TargetFunctionArn: !GetAtt ChatFunction.Arn
+      AuthType: NONE
+      InvokeMode: RESPONSE_STREAM
 
   ChatHistoryTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: test_chat_history
+      TableName: serverless_embed_ai_chat_history
       AttributeDefinitions:
         - AttributeName: browser_id
           AttributeType: S
@@ -51,6 +51,6 @@ Resources:
       BillingMode: PAY_PER_REQUEST
 
 Outputs:
-  WebEndpoint:
-    Description: "API Gateway endpoint URL"
-    Value: !Sub "https://${ApiId}.execute-api.${ApiRegion}.amazonaws.com/Prod/chat/" 
+  LambdaUrl:
+    Description: "Lambda Function URL endpoint"
+    Value: !Sub "https://${ChatFunctionUrl}"
