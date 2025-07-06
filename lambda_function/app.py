@@ -94,7 +94,7 @@ if __name__ == "__main__":
     # テスト用のイベントデータ
     test_event = {
         'body': json.dumps({
-            'message': 'かぎはどこ？',
+            'message': '部屋は禁煙ですか？',
             'previous_response_id': "resp_6866bef86f9881a2bb7fd2ba330503120dd52a052ded57e1"
         })
     }
