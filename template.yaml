@@ -17,7 +17,7 @@ Resources:
   ChatFunction:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: ./lambda
+      CodeUri: ./lambda_functions/
       Handler: app.lambda_handler
       Runtime: python3.13
       Timeout: 15

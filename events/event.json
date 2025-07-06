@@ -1,8 +1,0 @@
-{
-    "body": "{\"message\":\"こんにちは、世界!\",\"browser_id\":\"test-browser-id\"}",
-    "isBase64Encoded": false,
-    "httpMethod": "POST",
-    "headers": {
-      "Content-Type": "application/json"
-    }
-  }
