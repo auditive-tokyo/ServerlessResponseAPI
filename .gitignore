@@ -3,16 +3,9 @@ dir_*
 __pycache__/
 *env/
 .DS_Store
-nohup.out
-mypy.ini
-.mypy_cache
-app.log
-.env
 .aws-sam
 env.json
 samconfig.toml
-
-# For development
-package/
-layer.zip
-testChat.zip
+node_modules/
+テスト用コマンド.txt
+.env

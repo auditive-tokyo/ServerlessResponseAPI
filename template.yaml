@@ -5,6 +5,19 @@ Parameters:
   OpenAIApiKey:
     Type: String
     NoEcho: true
+  PromptTemplate:
+    Type: String
+    Description: "ID of the prompt template to use in OpenAI API."
+    Default: ""
+  OpenAiVectorStoreId:
+    Type: String
+    Description: "ID of the OpenAI Vector Store for file search."
+    Default: ""
+    NoEcho: true
+  VectorSearchFilterKey:
+    Type: String
+    Description: "Metadata key to use for filtering in vector search."
+    Default: ""
 
 Resources:
   LayerForServerlessEmbedAi:
@@ -12,24 +25,33 @@ Resources:
     Properties:
       ContentUri: ./layer/
       CompatibleRuntimes:
-        - python3.13
+        - nodejs20.x
+    Metadata:
+      BuildMethod: nodejs20.x
+      BuildArchitecture: x86_64
 
   ChatFunction:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: ./lambda_functions/
-      Handler: app.lambda_handler
-      Runtime: python3.13
+      CodeUri: ./lambda_function/
+      Handler: chat_handler.handler
+      Runtime: nodejs20.x
       Timeout: 15
       MemorySize: 512
       Environment:
         Variables:
           OPENAI_API_KEY: !Ref OpenAIApiKey
-      Policies:
-        - DynamoDBCrudPolicy:
-            TableName: !Ref ChatHistoryTable
+          PROMPT_TEMPLATE: !Ref PromptTemplate
+          OPENAI_VECTOR_STORE_ID: !Ref OpenAiVectorStoreId
+          VECTOR_SEARCH_FILTER_KEY: !Ref VectorSearchFilterKey
       Layers:
         - !Ref LayerForServerlessEmbedAi
+      Events:
+        ChatApi:
+          Type: Api
+          Properties:
+            Path: /chat
+            Method: POST
 
   ChatFunctionUrl:
     Type: AWS::Lambda::Url
@@ -37,21 +59,6 @@ Resources:
       TargetFunctionArn: !GetAtt ChatFunction.Arn
       AuthType: NONE
       InvokeMode: RESPONSE_STREAM
-
-  ChatHistoryTable:
-    Type: AWS::DynamoDB::Table
-    Properties:
-      TableName: serverless_embed_ai_chat_history
-      AttributeDefinitions:
-        - AttributeName: browser_id
-          AttributeType: S
-      KeySchema:
-        - AttributeName: browser_id
-          KeyType: HASH
-      BillingMode: PAY_PER_REQUEST
-      TimeToLiveSpecification:
-        AttributeName: ttl
-        Enabled: true
 
 Outputs:
   LambdaUrl:
