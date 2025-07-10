@@ -1,18 +1,21 @@
-# Chatbot with Serverless Architecture
+# Serverless Chatbot with OpenAI Vector Store
 
-A serverless-architected chatbot that utilizes embeddings and FAISS for similarity search indexing, featuring real-time streaming responses via Server-Sent Events (SSE).
+A serverless chatbot that leverages OpenAI's Response API and Vector Store for similarity search and real-time streaming responses.
 
 ## Features
 - Serverless architecture using AWS Lambda
-- Real-time streaming responses using Server-Sent Events (SSE)
-- Similarity search using FAISS indexing
-- Streaming responses from OpenAI's API
-- Chat history management with DynamoDB
-- Local development environment with SAM CLI
+- Real-time streaming responses (SSE)
+- Similarity search using OpenAI Vector Store (embedding-based retrieval)
+- Simple integration with OpenAI's Response API
+- Easy deployment with AWS SAM CLI
+
+## How it works
+The chatbot uses OpenAI's Vector Store to find and reference similar documents based on user queries via embeddings, and streams responses in real time.
 
 ## Local Development
-1. `sam build`
-2. `sam local invoke ChatFunction --event events/event.json` for testing
+1. `npm run build` (if using TypeScript)
+2. `sam build`
+3. `sam local start-api` for testing
 
 ## Deploy
-`sam deploy --guided` for 1st time
+Run `sam deploy` (use --guided for the first time)

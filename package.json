@@ -1,0 +1,27 @@
+{
+  "name": "serverless-embed-ai",
+  "version": "1.0.0",
+  "description": "Serverless AI Embedding Lambda Function",
+  "main": "dist/lambda_function/chat_handler.js",
+  "scripts": {
+    "clean": "rimraf dist",
+    "lint": "eslint lambda_function/**/*.ts",
+    "format": "prettier --write lambda_function/**/*.ts",
+    "build": "npm run clean && tsc",
+    "package": "npm run build && cp package.json package-lock.json ./dist/ && cd ./dist && npm ci --omit=dev && zip -r ../deployment.zip .",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "openai": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.150",
+    "@types/node": "^20.19.0",
+    "eslint": "^9.8.0",
+    "eslint-config-prettier": "^9.1.0",
+    "prettier": "^3.3.2",
+    "rimraf": "^5.0.10",
+    "typescript": "^5.5.3",
+    "typescript-eslint": "^8.0.0-alpha.40"
+  }
+}

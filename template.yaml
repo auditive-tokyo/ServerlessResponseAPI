@@ -33,7 +33,7 @@ Resources:
   ChatFunction:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: ./lambda_function/
+      CodeUri: ./dist/lambda_function/
       Handler: chat_handler.handler
       Runtime: nodejs22.x
       Timeout: 15
@@ -46,12 +46,6 @@ Resources:
           VECTOR_SEARCH_FILTER_KEY: !Ref VectorSearchFilterKey
       Layers:
         - !Ref LayerForServerlessEmbedAi
-      Events:
-        ChatApi:
-          Type: Api
-          Properties:
-            Path: /chat
-            Method: POST
 
   ChatFunctionUrl:
     Type: AWS::Lambda::Url
@@ -63,4 +57,4 @@ Resources:
 Outputs:
   LambdaUrl:
     Description: "Lambda Function URL endpoint"
-    Value: !Sub "https://${ChatFunctionUrl}"
+    Value: !Ref ChatFunctionUrl

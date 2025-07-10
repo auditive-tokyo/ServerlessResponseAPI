@@ -1,24 +1,34 @@
-const OpenAI = require('openai');
+import OpenAI from 'openai';
+
 const PROMPT_TEMPLATE = process.env.PROMPT_TEMPLATE;
 const OPENAI_VECTOR_STORE_ID = process.env.OPENAI_VECTOR_STORE_ID;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
 const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
-/**
- * @param {Object} params
- * @param {string} params.userMessage
- * @param {string} params.model
- * @param {string|null} params.previousResponseId
- * @param {Array<Object>|null} params.filters
- */
-async function* generateStreamResponse({ userMessage, model, previousResponseId = null, filters = null }) {
+interface Filter {
+    key: string;
+    type: string;
+    value: any;
+}
+
+export async function* generateStreamResponse({
+    userMessage,
+    model,
+    previousResponseId = null,
+    filters = null,
+}: {
+    userMessage: string;
+    model: string;
+    previousResponseId?: string | null;
+    filters?: Filter[] | null;
+}): AsyncGenerator<string> {
     try {
         console.info(`Response API File Search開始: '${userMessage}' (Vector Store: ${OPENAI_VECTOR_STORE_ID})`);
 
-        let tools = [];
+        let tools: any[] = [];
         if (OPENAI_VECTOR_STORE_ID) {
-            const toolsConfig = {
+            const toolsConfig: any = {
                 type: "file_search",
                 vector_store_ids: [OPENAI_VECTOR_STORE_ID],
                 max_num_results: 10,
@@ -35,7 +45,7 @@ async function* generateStreamResponse({ userMessage, model, previousResponseId 
             console.warn("No Vector Store ID provided, skipping file search tool");
         }
 
-        const requestPayload = {
+        const requestPayload: any = {
             model: model,
             prompt: { id: PROMPT_TEMPLATE },
             input: [{ role: "user", content: userMessage }],
@@ -68,11 +78,11 @@ async function* generateStreamResponse({ userMessage, model, previousResponseId 
         if (previousResponseId) requestPayload.previous_response_id = previousResponseId;
 
         // OpenAI Node.js SDK v5.x の新しいstreaming API
-        const responseStream = await openai.responses.create(requestPayload);
+        const response = await openai.responses.create(requestPayload);
 
-        // responseStreamがAsyncIterableの場合
-        for await (const chunk of responseStream) {
-            yield `data: ${JSON.stringify(chunk)}\n\n`;
+        // 型アサーションでAsyncIterableとして扱う
+        for await (const chunk of response as unknown as AsyncIterable<any>) {
+            yield chunk;
         }
 
         yield `data: ${JSON.stringify({ completed: true })}\n\n`;
@@ -83,5 +93,3 @@ async function* generateStreamResponse({ userMessage, model, previousResponseId 
         yield `data: ${JSON.stringify({ error: String(e) })}\n\n`;
     }
 }
-
-module.exports = { generateStreamResponse };

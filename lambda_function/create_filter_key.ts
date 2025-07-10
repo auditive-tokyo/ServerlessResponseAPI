@@ -1,10 +1,19 @@
+type FilterValue = string | number | boolean;
+type FilterType = "eq" | "ne" | "gt" | "gte" | "lt" | "lte";
+
+interface Filter {
+    key: string;
+    type: FilterType;
+    value: FilterValue;
+}
+
 /**
  * OpenAI Vector Search用のフィルターキーを作成する関数
  *
- * @param {Array<string|number|boolean>} values - フィルタリングする値のリスト
+ * @param {Array<FilterValue>} values - フィルタリングする値のリスト
  * @param {string} filterType - フィルタリングタイプ (eq, ne, gt, gte, lt, lte)
  * @param {string} filterKey - フィルターキー名（環境変数VECTOR_SEARCH_FILTER_KEYまたは指定値）
- * @returns {Array<Object>} フィルター辞書のリスト
+ * @returns {Array<Filter>} フィルター辞書のリスト
  *
  * @example
  * createFilterKeys(["201", "common"], "eq", "room_number")
@@ -19,12 +28,14 @@
  * //   { key: "price", type: "gt", value: 200 }
  * // ]
  */
-function createFilterKeys(values, filterType = "eq", filterKey = null) {
+export function createFilterKeys(
+    values: FilterValue[],
+    filterType: FilterType = "eq",
+    filterKey: string
+): Filter[] {
     return values.map(value => ({
         key: filterKey,
         type: filterType,
         value: value
     }));
 }
-
-module.exports = { createFilterKeys };
