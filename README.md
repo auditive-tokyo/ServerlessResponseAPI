@@ -19,3 +19,15 @@ The chatbot uses OpenAI's Vector Store to find and reference similar documents b
 
 ## Deploy
 Run `sam deploy` (use --guided for the first time)
+
+## GitHub Actions Integration
+
+You can integrate this repository from another GitHub Actions workflow using the `actions/checkout` step with the `repository` option:
+
+```yaml
+- name: Checkout ServerlessEmbedAI
+  uses: actions/checkout@v4
+  with:
+    repository: auditive-tokyo/serverlessembeddai
+    ref: main
+```
