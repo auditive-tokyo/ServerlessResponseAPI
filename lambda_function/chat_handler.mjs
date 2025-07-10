@@ -11,6 +11,7 @@ export const handler = awslambda.streamifyResponse(
             try {
                 body = typeof event.body === 'string' ? JSON.parse(event.body) : event.body;
             } catch (e) {
+                console.error('Request body parse error:', e);
                 responseStream.write(JSON.stringify({ error: 'Request body is required' }));
                 responseStream.end();
                 return;
@@ -18,8 +19,10 @@ export const handler = awslambda.streamifyResponse(
 
             const userMessage = body.message || '';
             const previousResponseId = body.previous_response_id || null;
+            const filterKeys = Array.isArray(body.filter_keys) ? body.filter_keys : [];
 
             if (!userMessage) {
+                console.warn('Message is required but not provided');
                 responseStream.write(JSON.stringify({ error: 'Message is required' }));
                 responseStream.end();
                 return;
@@ -27,7 +30,7 @@ export const handler = awslambda.streamifyResponse(
 
             let filters = null;
             if (VECTOR_SEARCH_FILTER_KEY) {
-                filters = createFilterKeys(["201", "common"], "eq", VECTOR_SEARCH_FILTER_KEY);
+                filters = createFilterKeys(filterKeys, "eq", VECTOR_SEARCH_FILTER_KEY);
             }
 
             for await (const chunk of generateStreamResponse({
@@ -39,8 +42,9 @@ export const handler = awslambda.streamifyResponse(
                 responseStream.write(chunk);
             }
             responseStream.end();
+            console.info('Full response text:', responseText);
         } catch (e) {
-            console.error(`Error in handler: ${e}`);
+            console.error('Error in handler:', e);
             responseStream.write(JSON.stringify({ error: String(e) }));
             responseStream.end();
         }
