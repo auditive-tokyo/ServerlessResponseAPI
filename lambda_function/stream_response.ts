@@ -22,7 +22,7 @@ export async function* generateStreamResponse({
     model: string;
     previousResponseId?: string | null;
     filters?: Filter[] | null;
-}): AsyncGenerator<string> {
+}): AsyncGenerator<any> {
     try {
         console.info(`Response API File Search開始: '${userMessage}' (Vector Store: ${OPENAI_VECTOR_STORE_ID})`);
 
