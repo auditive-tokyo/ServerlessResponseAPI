@@ -53,6 +53,14 @@ Resources:
       TargetFunctionArn: !GetAtt ChatFunction.Arn
       AuthType: NONE
       InvokeMode: RESPONSE_STREAM
+      Cors:
+        AllowOrigins:
+          - http://localhost:5173
+        AllowHeaders:
+          - content-type
+        AllowMethods:
+          - POST
+        AllowCredentials: false
 
 Outputs:
   LambdaUrl:
