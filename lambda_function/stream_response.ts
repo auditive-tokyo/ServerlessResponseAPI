@@ -78,10 +78,8 @@ export async function* generateStreamResponse({
         };
         if (previousResponseId) requestPayload.previous_response_id = previousResponseId;
 
-        // OpenAI Node.js SDK v5.x の新しいstreaming API
         const response = await openai.responses.create(requestPayload);
 
-        // 型アサーションでAsyncIterableとして扱う
         for await (const chunk of response as unknown as AsyncIterable<any>) {
             yield chunk;
         }
