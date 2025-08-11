@@ -11,9 +11,6 @@
     "package": "npm run build && cp package.json package-lock.json ./dist/ && cd ./dist && npm ci --omit=dev && zip -r ../deployment.zip .",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "dependencies": {
-    "openai": "^4.0.0"
-  },
   "devDependencies": {
     "@types/aws-lambda": "^8.10.150",
     "@types/node": "^20.19.0",
@@ -23,5 +20,8 @@
     "rimraf": "^5.0.10",
     "typescript": "^5.5.3",
     "typescript-eslint": "^8.0.0-alpha.40"
+  },
+  "dependencies": {
+    "openai": "^5.12.2"
   }
 }
