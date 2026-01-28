@@ -10,3 +10,4 @@ node_modules/
 テスト用コマンド.txt
 .env
 dist/
+coverage/

@@ -1,3 +1,4 @@
+import { describe, it, expect, beforeAll, vi, beforeEach, afterEach } from "vitest";
 import {
   generateStreamResponse,
   StreamYield,
@@ -8,7 +9,24 @@ import { ResponseCompletedEvent } from "openai/resources/responses/responses";
  * 型ガード: ResponseCompletedEventかどうか
  */
 function isCompletedEvent(chunk: StreamYield): chunk is ResponseCompletedEvent {
-  return typeof chunk === "object" && chunk !== null && chunk.type === "response.completed";
+  return (
+    typeof chunk === "object" &&
+    chunk !== null &&
+    chunk.type === "response.completed"
+  );
+}
+
+/**
+ * 型ガード: エラーレスポンスかどうか
+ */
+function isErrorResponse(chunk: StreamYield): boolean {
+  if (typeof chunk !== "string") return false;
+  try {
+    const parsed = JSON.parse(chunk.replace("data: ", "").trim());
+    return "error" in parsed;
+  } catch {
+    return false;
+  }
 }
 
 describe("stream_response", () => {
@@ -122,5 +140,81 @@ describe("stream_response", () => {
 
       expect(hasResponse).toBe(true);
     }, 60000); // 2回のAPI呼び出しがあるので60秒
+
+    it("should handle API errors gracefully", async () => {
+      if (!hasApiKey) {
+        return;
+      }
+
+      const chunks: StreamYield[] = [];
+      let hasError = false;
+
+      for await (const chunk of generateStreamResponse({
+        userMessage: "Test error handling",
+        model: "invalid-model-name-that-does-not-exist",
+        previousResponseId: null,
+      })) {
+        chunks.push(chunk);
+        if (isErrorResponse(chunk)) {
+          hasError = true;
+        }
+      }
+
+      expect(hasError).toBe(true);
+    }, 30000);
+  });
+
+  describe("generateStreamResponse without Vector Store", () => {
+    const originalVectorStoreId = process.env.OPENAI_VECTOR_STORE_ID;
+    const hasApiKey = !!process.env.OPENAI_API_KEY;
+
+    beforeEach(() => {
+      // Vector Store IDを一時的に削除
+      delete process.env.OPENAI_VECTOR_STORE_ID;
+    });
+
+    afterEach(() => {
+      // 元に戻す
+      if (originalVectorStoreId) {
+        process.env.OPENAI_VECTOR_STORE_ID = originalVectorStoreId;
+      }
+    });
+
+    it("should work without Vector Store ID and log warning", async () => {
+      if (!hasApiKey) {
+        return;
+      }
+
+      // console.warnをスパイ
+      const warnSpy = vi.spyOn(console, "warn");
+
+      // モジュールを再読み込み（環境変数の変更を反映）
+      vi.resetModules();
+      const { generateStreamResponse: freshGenerate } = await import(
+        "../lambda_function/stream_response"
+      );
+
+      const chunks: StreamYield[] = [];
+      let hasCompleted = false;
+
+      for await (const chunk of freshGenerate({
+        userMessage: "Say hello briefly without file search.",
+        model: "gpt-5-mini",
+        previousResponseId: null,
+      })) {
+        chunks.push(chunk);
+        if (typeof chunk !== "string" && chunk.type === "response.completed") {
+          hasCompleted = true;
+        }
+      }
+
+      expect(chunks.length).toBeGreaterThan(0);
+      expect(hasCompleted).toBe(true);
+      expect(warnSpy).toHaveBeenCalledWith(
+        "No Vector Store ID provided, skipping file search tool",
+      );
+
+      warnSpy.mockRestore();
+    }, 30000);
   });
 });
