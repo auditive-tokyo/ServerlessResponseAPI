@@ -1,4 +1,9 @@
 import OpenAI from 'openai';
+import {
+    ResponseCreateParamsStreaming,
+    ResponseStreamEvent,
+    FileSearchTool
+} from 'openai/resources/responses/responses';
 
 const PROMPT_TEMPLATE = process.env.PROMPT_TEMPLATE;
 const OPENAI_VECTOR_STORE_ID = process.env.OPENAI_VECTOR_STORE_ID;
@@ -9,8 +14,13 @@ const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 interface Filter {
     key: string;
     type: string;
-    value: any;
+    value: string | number | boolean;
 }
+
+/**
+ * generateStreamResponseの戻り値型（OpenAIイベントまたは文字列メッセージ）
+ */
+export type StreamYield = ResponseStreamEvent | string;
 
 export async function* generateStreamResponse({
     userMessage,
@@ -22,13 +32,13 @@ export async function* generateStreamResponse({
     model: string;
     previousResponseId?: string | null;
     filters?: Filter[] | null;
-}): AsyncGenerator<any> {
+}): AsyncGenerator<StreamYield> {
     try {
         console.info(`Response API File Search開始: '${userMessage}' (Vector Store: ${OPENAI_VECTOR_STORE_ID})`);
 
-        let tools: any[] = [];
+        let tools: FileSearchTool[] = [];
         if (OPENAI_VECTOR_STORE_ID) {
-            const toolsConfig: any = {
+            const toolsConfig: FileSearchTool = {
                 type: "file_search",
                 vector_store_ids: [OPENAI_VECTOR_STORE_ID],
                 max_num_results: 10,
@@ -45,10 +55,10 @@ export async function* generateStreamResponse({
             console.warn("No Vector Store ID provided, skipping file search tool");
         }
 
-        const requestPayload: any = {
+        const requestPayload: ResponseCreateParamsStreaming = {
             model: model,
-            prompt: { id: PROMPT_TEMPLATE },
-            input: [{ role: "user", content: userMessage }],
+            instructions: PROMPT_TEMPLATE,
+            input: userMessage,
             tools: tools,
             temperature: 0.7,
             truncation: "auto",
@@ -74,13 +84,13 @@ export async function* generateStreamResponse({
                         additionalProperties: false
                     }
                 }
-            }
+            },
+            ...(previousResponseId && { previous_response_id: previousResponseId })
         };
-        if (previousResponseId) requestPayload.previous_response_id = previousResponseId;
 
         const response = await openai.responses.create(requestPayload);
 
-        for await (const chunk of response as unknown as AsyncIterable<any>) {
+        for await (const chunk of response as AsyncIterable<ResponseStreamEvent>) {
             yield chunk;
         }
 
