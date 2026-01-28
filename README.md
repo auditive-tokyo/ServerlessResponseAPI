@@ -17,6 +17,44 @@ The chatbot uses OpenAI's Vector Store to find and reference similar documents b
 2. `sam build`
 3. `sam local start-api` for testing
 
+## Testing
+
+### Setup
+```bash
+npm install
+```
+
+### Run Tests
+```bash
+# Run all tests
+npm test
+
+# Run specific test file
+npm test -- --testPathPattern=chat_handler
+npm test -- --testPathPattern=stream_response
+
+# Watch mode
+npm run test:watch
+
+# Skip Prompt Template ID (if not configured)
+PROMPT_TEMPLATE_ID="" npm test
+```
+
+### Test Structure
+```
+test/
+├── chat_handler.test.ts    # Unit tests for Lambda handler
+└── stream_response.test.ts # Integration tests for OpenAI API
+```
+
+### Environment Variables
+Create a `.env` file for local testing:
+```
+OPENAI_API_KEY=your-api-key
+OPENAI_VECTOR_STORE_ID=vs_xxxxx
+PROMPT_TEMPLATE_ID=pmpt_xxxxx  # Optional
+```
+
 ## Deploy
 Run `sam deploy` (use --guided for the first time)
 

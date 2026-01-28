@@ -1,4 +1,3 @@
-import { createFilterKeys } from "./create_filter_key";
 import { generateStreamResponse, StreamYield } from "./stream_response";
 import { LambdaFunctionURLEvent, Context, Handler } from "aws-lambda";
 import {
@@ -8,13 +7,11 @@ import {
 } from "openai/resources/responses/responses";
 
 const DEBUG = "true"; // TODO: デバッグモードは環境変数にするか？めんどいよね〜
-const MODEL = "gpt-4.1-mini";
-const VECTOR_SEARCH_FILTER_KEY = process.env.VECTOR_SEARCH_FILTER_KEY;
+const MODEL = "gpt-5-mini";
 
 interface RequestBody {
   message?: string;
   previous_response_id?: string;
-  filter_keys?: string[];
 }
 
 /**
@@ -29,21 +26,33 @@ interface ResponseStream {
  * 型ガード: ResponseTextDeltaEventかどうか
  */
 function isTextDeltaEvent(chunk: StreamYield): chunk is ResponseTextDeltaEvent {
-  return typeof chunk === "object" && chunk !== null && chunk.type === "response.output_text.delta";
+  return (
+    typeof chunk === "object" &&
+    chunk !== null &&
+    chunk.type === "response.output_text.delta"
+  );
 }
 
 /**
  * 型ガード: ResponseTextDoneEventかどうか
  */
 function isTextDoneEvent(chunk: StreamYield): chunk is ResponseTextDoneEvent {
-  return typeof chunk === "object" && chunk !== null && chunk.type === "response.output_text.done";
+  return (
+    typeof chunk === "object" &&
+    chunk !== null &&
+    chunk.type === "response.output_text.done"
+  );
 }
 
 /**
  * 型ガード: ResponseCompletedEventかどうか
  */
 function isCompletedEvent(chunk: StreamYield): chunk is ResponseCompletedEvent {
-  return typeof chunk === "object" && chunk !== null && chunk.type === "response.completed";
+  return (
+    typeof chunk === "object" &&
+    chunk !== null &&
+    chunk.type === "response.completed"
+  );
 }
 
 /**
@@ -59,30 +68,6 @@ type StreamifyHandler = (
 declare const awslambda: {
   streamifyResponse(handler: StreamifyHandler): Handler;
 };
-
-/**
- * filter_keysを配列に正規化する
- */
-function normalizeFilterKeys(
-  filterKeys: string[] | string | undefined,
-): string[] {
-  if (Array.isArray(filterKeys)) {
-    return filterKeys;
-  }
-  return filterKeys ? [filterKeys] : [];
-}
-
-/**
- * フィルターを作成する（条件を満たさない場合はnull）
- */
-function buildFilters(
-  filterKeys: string[],
-): ReturnType<typeof createFilterKeys> | null {
-  if (VECTOR_SEARCH_FILTER_KEY && filterKeys.length > 0) {
-    return createFilterKeys(filterKeys, "eq", VECTOR_SEARCH_FILTER_KEY);
-  }
-  return null;
-}
 
 /**
  * ストリーミングチャンクを処理してレスポンスに書き込む
@@ -139,22 +124,16 @@ export const handler = awslambda.streamifyResponse(
       const body: RequestBody = JSON.parse(event.body);
       const userMessage = body.message;
       const previousResponseId = body.previous_response_id;
-      const filterKeys = normalizeFilterKeys(body.filter_keys);
-      console.debug("Received filter keys:", filterKeys);
 
       if (!userMessage) {
         writeErrorAndEnd(responseStream, "Message is required");
         return;
       }
 
-      const filters = buildFilters(filterKeys);
-      console.info("Filters key(s):", filters);
-
       for await (const chunk of generateStreamResponse({
         userMessage,
         model: MODEL,
         previousResponseId,
-        filters,
       })) {
         writeChunkToStream(chunk, responseStream);
       }

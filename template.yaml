@@ -1,4 +1,4 @@
-AWSTemplateFormatVersion: '2010-09-09'
+AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 
 Parameters:
@@ -41,9 +41,8 @@ Resources:
       Environment:
         Variables:
           OPENAI_API_KEY: !Ref OpenAIApiKey
-          PROMPT_TEMPLATE: !Ref PromptTemplate
+          PROMPT_TEMPLATE_ID: !Ref PromptTemplate
           OPENAI_VECTOR_STORE_ID: !Ref OpenAiVectorStoreId
-          VECTOR_SEARCH_FILTER_KEY: !Ref VectorSearchFilterKey
       Layers:
         - !Ref LayerForServerlessEmbedAi
 
